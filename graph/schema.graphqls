@@ -1,0 +1,327 @@
+# GraphQL schema example
+#
+# https://gqlgen.com/getting-started/
+scalar Date
+directive @auth on FIELD | FIELD_DEFINITION
+enum OperationEnum {
+  Entree
+  Sortie
+}
+
+type Address {
+  city: String!
+  street: String!
+}
+
+type Product {
+  id: ID!
+  name: String!
+  imageUrl: String
+  priceIn: Float!
+  discount: Float
+  priceOut: Float!
+  category: String
+  unite: String
+}
+
+type PriceProductEvolution {
+  id: ID!
+  product: Product!
+  price: Float!
+  date: Date!
+}
+type Fournisseur {
+  id: ID!
+  name: String!
+  phone: String!
+  city: String!
+}
+
+type Approvisionement {
+  id: ID!
+  product: Product!
+  quantity: Float!
+  charges: Float!
+  from: Fournisseur!
+  date: Date!
+}
+
+type Client {
+  id: ID!
+  name: String!
+  phone: String
+  note: String
+}
+
+type Company {
+  id: ID!
+  name: String!
+  owner: User
+  address: String!
+  type: String!
+  logo: String
+  idNat: String
+  detail: String
+  email: String
+  isPayed: Boolean!
+}
+
+type User {
+  id: ID!
+  name: String!
+  avatar: String!
+  company: String
+  address: String!
+  phone: String!
+  isBlocked: Boolean!
+  password: String!
+  lastLogin: Date!
+}
+
+type Caisse {
+  id: ID!
+  in: Float!
+  out: Float!
+}
+
+type Trans {
+  id: ID!
+  amount: Float
+  operation: OperationEnum!
+  date: Date!
+}
+
+type Auth {
+  token: String
+  user: User
+}
+
+type Stock {
+  id: ID
+  product: Product!
+  quantity: Float!
+  stockMin: Float!
+  date: Float!
+}
+
+type MouvementStock {
+  id: ID
+  product: Product!
+  quantity: Float!
+  operation: OperationEnum!
+  date: String!
+}
+
+input AddressInput {
+  city: String!
+  street: String!
+}
+type ProductInBasket {
+  product: Product!
+  count: Float!
+}
+
+type Sale {
+  id: ID!
+  basket: [ProductInBasket!]!
+  priceToPay: Float!
+  pricePayed: Float!
+  client: Client!
+  operator: User
+  date: Date!
+}
+
+input NewUserInput {
+  name: String!
+  avatar: String!
+  address: String!
+  phone: String!
+  password: String!
+}
+
+input UpdateUserInput {
+  name: String
+  avatar: String
+  address: String
+}
+
+input NewCompanyInput {
+  name: String!
+  address: String!
+  owner: NewUserInput!
+  type: String!
+  logo: String
+  idNat: String
+  detail: String
+  email: String
+}
+input UpdateCompanyInput {
+  name: String
+  address: String
+  type: String
+  logo: String
+  idNat: String
+  detail: String
+  email: String
+}
+input NewProductInput {
+  name: String!
+  imageUrl: String
+  priceIn: Float!
+  priceOut: Float!
+  discount: Float!
+  stockMin: Float!
+  stock: Float!
+  category: String
+  unite: String
+}
+
+input UpdateProductInput {
+  name: String
+  imageUrl: String
+  priceIn: Float
+  priceOut: Float
+  discount: Float
+  category: String
+  unite: String
+}
+
+input NewFournisseurInput {
+  name: String!
+  phone: String!
+  city: String!
+}
+input UpdateFournisseurInput {
+  name: String
+  phone: String
+  city: String
+}
+input NewClientInput {
+  name: String!
+  phone: String!
+  note: String!
+}
+
+input UpdateClientInput {
+  name: String
+  phone: String
+  note: String
+}
+
+input ClientInput {
+  name: String!
+  phone: String!
+  note: String!
+}
+
+input ProductInput {
+  id: ID!
+  name: String!
+  imageUrl: String
+  priceIn: Float!
+  priceOut: Float!
+
+  category: String
+  unite: String
+}
+
+input ProductInBasketInput {
+  product: ProductInput!
+  count: Float!
+}
+
+input NewSaleInput {
+  basket: [ProductInBasketInput!]!
+  pricePayed: Float!
+  priceToPay: Float!
+  client: ClientInput
+}
+
+input PriceProductEvolutionInput {
+  product: String!
+  price: Float!
+  discount: Float!
+  date: Date!
+}
+
+type Query {
+  users: [User!]! @auth
+  user(phone: String!): User
+  me: User! @auth
+
+  #company
+  companies: [Company!]! @auth
+  company(id: ID, name: String, code: String): Company @auth
+
+  #sales
+  sales: [Sale!]! @auth
+  sale(id: String): Sale @auth
+
+  #Approvisionnement
+  approvisionements: [Approvisionement!]! @auth
+
+  #Stock mouvements
+  mouvementStock: [MouvementStock!]! @auth
+  stock: [Stock!]! @auth
+
+  # product
+  product: [Product!]! @auth
+
+  #caisse:
+  caisse: Caisse!
+  caisseTrans: [Trans!]!
+}
+
+type Mutation {
+  #user
+  createAccount(data: NewCompanyInput!): Auth!
+  # sendVerificationUserAccount(phone: String!): Boolean!
+  # verifyUserAccount(phone: String!, code: String!): Boolean!
+  changePassword(phone: String!, code: String!, password: String!): Boolean!
+  loginUser(phone: String!, password: String!): Auth!
+  blockUserAccount(id: ID): Boolean! @auth
+  updateUser(id: ID!, data: UpdateUserInput!): Boolean! @auth
+
+  #company
+  #createUser(data: NewUserInput!): Boolean! @auth
+  updateCompany(id: ID!, data: UpdateCompanyInput): Boolean! @auth
+
+  #appro
+
+  createProduct(data: NewProductInput!): Boolean! @auth
+  updateProduct(id: ID!, data: UpdateProductInput!): Boolean! @auth
+  #updatePrice(id: ID!, data: PriceProductEvolutionInput!): Boolean! @auth
+
+  # #vente
+  # sell(data: NewSaleInput!): Boolean! @auth
+
+  # #stock
+  # addInStock(id: ID!, idProduct: String, quantity: Float!): Boolean! @auth
+  # removeInStock(id: ID!): Boolean! @auth
+
+  # #actions mouvement
+  # rechargeCaisse(amount: Float!, libel: String!): Boolean! @auth
+  # withdrawCaisse(amount: Float!, libel: String!): Boolean! @auth
+  # subscribe(code: String!): Boolean! @auth
+}
+
+input NewCompany {
+  name: String!
+  category: String!
+  city: String!
+  address: String!
+  contacts: [String!]!
+  stateIds: NewStateIdentity!
+  logo: String!
+}
+
+input NewStateIdentity {
+  rccm: String
+  idNat: String
+  idCommerce: String
+}
+
+input LoginData {
+  phone: String!
+  password: String!
+}
