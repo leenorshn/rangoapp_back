@@ -2,145 +2,136 @@ package database
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"time"
-
-	"rangoapp/graph/model"
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func (db *DB) InsertCompany(newcompany model.NewCompanyInput) (*model.Company, error) {
-	companyCollection := colHelper(db, "companies")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	company, err := db.CheckCompanyByName(newcompany.Name)
-	if err != nil {
-		return nil, gqlerror.Errorf("Erreur d'ecriture")
-	}
-
-	if company != nil {
-		return nil, gqlerror.Errorf("This all ready existe")
-	}
-
-	res, err := companyCollection.InsertOne(ctx, bson.D{
-		{Key: "isVerified", Value: true},
-		{Key: "logo", Value: newcompany.Logo},
-		{Key: "detail", Value: newcompany.Detail},
-		{Key: "name", Value: newcompany.Name},
-		{Key: "address", Value: newcompany.Address},
-		{Key: "idNat", Value: newcompany.IDNat},
-		{Key: "email", Value: newcompany.Email},
-		{Key: "isBlocked", Value: false},
-		{Key: "createdAt", Value: time.Now().Local().String()},
-	})
-	if err != nil {
-		return nil, gqlerror.Errorf("Erreur d'insertion de donnee")
-	}
-
-	return &model.Company{
-		ID:      res.InsertedID.(primitive.ObjectID).Hex(),
-		Name:    newcompany.Name,
-		Detail:  newcompany.Detail,
-		Logo:    newcompany.Logo,
-		Address: newcompany.Address,
-		Email:   newcompany.Email,
-		IDNat:   &newcompany.Type,
-	}, nil
+type Company struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name        string             `bson:"name" json:"name"`
+	Address     string             `bson:"address" json:"address"`
+	Phone       string             `bson:"phone" json:"phone"`
+	Email       *string            `bson:"email,omitempty" json:"email,omitempty"`
+	Description string             `bson:"description" json:"description"`
+	Type        string             `bson:"type" json:"type"`
+	Logo        *string            `bson:"logo,omitempty" json:"logo,omitempty"`
+	Rccm        *string            `bson:"rccm,omitempty" json:"rccm,omitempty"`
+	IDNat       *string            `bson:"idNat,omitempty" json:"idNat,omitempty"`
+	IDCommerce  *string            `bson:"idCommerce,omitempty" json:"idCommerce,omitempty"`
+	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt   time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
 
-func (db *DB) FindCompanies() []*model.Company {
+func (db *DB) CreateCompany(name, address, phone, description, companyType string, email, logo, rccm, idNat, idCommerce *string) (*Company, error) {
+	companyCollection := colHelper(db, "companies")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Check if company with same name already exists
+	var existingCompany Company
+	err := companyCollection.FindOne(ctx, bson.M{"name": name}).Decode(&existingCompany)
+	if err == nil {
+		return nil, gqlerror.Errorf("Company with this name already exists")
+	} else if err != mongo.ErrNoDocuments {
+		return nil, gqlerror.Errorf("Error checking company: %v", err)
+	}
+
+	company := Company{
+		ID:          primitive.NewObjectID(),
+		Name:        name,
+		Address:     address,
+		Phone:       phone,
+		Email:       email,
+		Description: description,
+		Type:        companyType,
+		Logo:        logo,
+		Rccm:        rccm,
+		IDNat:       idNat,
+		IDCommerce:  idCommerce,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	_, err = companyCollection.InsertOne(ctx, company)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error creating company: %v", err)
+	}
+
+	return &company, nil
+}
+
+func (db *DB) FindCompanyByID(id string) (*Company, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid company ID")
+	}
 
 	companyCollection := colHelper(db, "companies")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	opts := options.Find().SetSort(bson.D{})
-	cur, err := companyCollection.Find(ctx, bson.D{}, opts)
 
+	var company Company
+	err = companyCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&company)
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer cur.Close(ctx)
-	var companies []*model.Company
-
-	// Get a list of all returned documents and print them out.
-	// See the mongo.Cursor documentation for more examples of using cursors.
-	for cur.Next(ctx) {
-
-		var company *model.Company
-		if err != nil {
-			log.Fatal(err)
+		if err == mongo.ErrNoDocuments {
+			return nil, gqlerror.Errorf("Company not found")
 		}
-
-		if err = cur.Decode(&company); err != nil {
-			log.Fatal(err)
-		}
-
-		companies = append(companies, company)
+		return nil, gqlerror.Errorf("Error finding company: %v", err)
 	}
 
-	if err := cur.Err(); err != nil {
-		log.Fatal(err)
-	}
-
-	return companies
+	return &company, nil
 }
 
-func (db *DB) FindCompany(name string) (*model.Company, error) {
+func (db *DB) UpdateCompany(id string, name, address, phone, description, companyType *string, email, logo, rccm, idNat, idCommerce *string) (*Company, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid company ID")
+	}
 
 	companyCollection := colHelper(db, "companies")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var company *model.Company
 
-	err := companyCollection.FindOne(ctx, bson.M{"name": name}).Decode(&company)
-	if err != nil {
-		return nil, gqlerror.Errorf("%s", err)
+	update := bson.M{"updatedAt": time.Now()}
+	if name != nil {
+		update["name"] = *name
+	}
+	if address != nil {
+		update["address"] = *address
+	}
+	if phone != nil {
+		update["phone"] = *phone
+	}
+	if email != nil {
+		update["email"] = *email
+	}
+	if description != nil {
+		update["description"] = *description
+	}
+	if companyType != nil {
+		update["type"] = *companyType
+	}
+	if logo != nil {
+		update["logo"] = *logo
+	}
+	if rccm != nil {
+		update["rccm"] = *rccm
+	}
+	if idNat != nil {
+		update["idNat"] = *idNat
+	}
+	if idCommerce != nil {
+		update["idCommerce"] = *idCommerce
 	}
 
-	return company, nil
-
-}
-
-func (db *DB) UpdateCompanyData(id string, data *model.UpdateCompanyInput) (bool, error) {
-	ObjectID, err := primitive.ObjectIDFromHex(id)
+	_, err = companyCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": update})
 	if err != nil {
-		return false, err
-	}
-	actionCollection := colHelper(db, "companies")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	filterCompany := bson.D{{Key: "_id", Value: ObjectID}}
-	updateCompany := bson.D{{Key: "$set", Value: data}}
-	resultCompany, err := actionCollection.UpdateOne(ctx, filterCompany, updateCompany)
-
-	if err != nil {
-		return false, err
-	}
-	fmt.Printf("%d", resultCompany.ModifiedCount)
-	return true, nil
-}
-
-func (db *DB) CheckCompanyByName(name string) (*model.Company, error) {
-
-	companyCollection := colHelper(db, "companies")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	var company *model.Company
-
-	result := companyCollection.FindOne(ctx, bson.M{"name": name})
-	err := result.Decode(&company)
-	if err != nil {
-		fmt.Println("Erreur company not found")
-
+		return nil, gqlerror.Errorf("Error updating company: %v", err)
 	}
 
-	return company, nil
-
+	return db.FindCompanyByID(id)
 }

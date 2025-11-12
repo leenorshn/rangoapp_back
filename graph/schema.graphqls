@@ -1,327 +1,353 @@
-# GraphQL schema example
-#
-# https://gqlgen.com/getting-started/
-scalar Date
+# GraphQL schema for RangoApp Multi-Store Management System
+
 directive @auth on FIELD | FIELD_DEFINITION
-enum OperationEnum {
-  Entree
-  Sortie
-}
 
-type Address {
-  city: String!
-  street: String!
-}
+scalar Date
 
-type Product {
-  id: ID!
-  name: String!
-  imageUrl: String
-  priceIn: Float!
-  discount: Float
-  priceOut: Float!
-  category: String
-  unite: String
-}
+# ============ TYPES ============
 
-type PriceProductEvolution {
+type User {
   id: ID!
-  product: Product!
-  price: Float!
-  date: Date!
-}
-type Fournisseur {
-  id: ID!
+  uid: String!
   name: String!
   phone: String!
-  city: String!
-}
-
-type Approvisionement {
-  id: ID!
-  product: Product!
-  quantity: Float!
-  charges: Float!
-  from: Fournisseur!
-  date: Date!
-}
-
-type Client {
-  id: ID!
-  name: String!
-  phone: String
-  note: String
+  email: String
+  role: String! # Admin, User, etc.
+  isBlocked: Boolean!
+  companyId: String!
+  storeIds: [String!]! # Liste des stores pour Admin, un seul store pour User
+  assignedStoreId: String # Store assigné (pour User non-admin)
+  createdAt: String!
+  updatedAt: String!
 }
 
 type Company {
   id: ID!
   name: String!
-  owner: User
   address: String!
+  phone: String!
+  email: String
+  description: String!
   type: String!
   logo: String
+  rccm: String
   idNat: String
-  detail: String
-  email: String
-  isPayed: Boolean!
+  idCommerce: String
+  stores: [Store!]! # Liste des boutiques de l'entreprise
+  createdAt: String!
+  updatedAt: String!
 }
 
-type User {
+type Store {
   id: ID!
   name: String!
-  avatar: String!
-  company: String
   address: String!
   phone: String!
-  isBlocked: Boolean!
-  password: String!
-  lastLogin: Date!
+  companyId: String!
+  company: Company!
+  createdAt: String!
+  updatedAt: String!
 }
 
-type Caisse {
+type Product {
   id: ID!
-  in: Float!
-  out: Float!
+  name: String!
+  mark: String!
+  priceVente: Float!
+  priceAchat: Float!
+  stock: Float!
+  storeId: String!
+  store: Store!
+  createdAt: String!
+  updatedAt: String!
 }
 
-type Trans {
+type Client {
   id: ID!
-  amount: Float
-  operation: OperationEnum!
-  date: Date!
+  name: String!
+  phone: String!
+  storeId: String!
+  store: Store!
+  createdAt: String!
+  updatedAt: String!
 }
 
-type Auth {
-  token: String
-  user: User
+type Provider {
+  id: ID!
+  name: String!
+  phone: String!
+  address: String!
+  storeId: String!
+  store: Store!
+  createdAt: String!
+  updatedAt: String!
 }
 
-type Stock {
-  id: ID
-  product: Product!
-  quantity: Float!
-  stockMin: Float!
-  date: Float!
-}
-
-type MouvementStock {
-  id: ID
-  product: Product!
-  quantity: Float!
-  operation: OperationEnum!
+type Facture {
+  id: ID!
+  factureNumber: String!
+  products: [FactureProduct!]!
+  quantity: Int!
   date: String!
-}
-
-input AddressInput {
-  city: String!
-  street: String!
-}
-type ProductInBasket {
-  product: Product!
-  count: Float!
-}
-
-type Sale {
-  id: ID!
-  basket: [ProductInBasket!]!
-  priceToPay: Float!
-  pricePayed: Float!
+  price: Float!
+  currency: String!
   client: Client!
-  operator: User
-  date: Date!
+  storeId: String!
+  store: Store!
+  createdAt: String!
+  updatedAt: String!
 }
 
-input NewUserInput {
-  name: String!
-  avatar: String!
-  address: String!
-  phone: String!
+type FactureProduct {
+  productId: String!
+  product: Product!
+  quantity: Int!
+  price: Float!
+}
+
+type RapportStore {
+  id: ID!
+  type: String! # "entree" ou "sortie"
+  product: Product!
+  quantity: Float!
+  date: String!
+  storeId: String!
+  store: Store!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type AuthResponse {
+  token: String!
+  user: User!
+}
+
+# ============ INPUTS ============
+
+input RegisterInput {
+  # Informations utilisateur Admin
+  email: String!
   password: String!
+  name: String!
+  phone: String!
+  
+  # Informations Company
+  companyName: String!
+  companyAddress: String!
+  companyPhone: String!
+  companyDescription: String!
+  companyType: String!
+  companyEmail: String
+  companyLogo: String
+  companyRccm: String
+  companyIdNat: String
+  companyIdCommerce: String
+  
+  # Informations du premier Store (boutique)
+  storeName: String!
+  storeAddress: String!
+  storePhone: String!
+}
+
+input CreateUserInput {
+  name: String!
+  phone: String!
+  email: String
+  password: String!
+  role: String! # "Admin" ou "User"
+  storeId: String # Optionnel: si role="User", assigner directement à un store
 }
 
 input UpdateUserInput {
   name: String
-  avatar: String
-  address: String
+  phone: String
+  email: String
+  role: String
+  storeId: String # Pour changer l'assignation de store (si role="User")
 }
 
-input NewCompanyInput {
-  name: String!
-  address: String!
-  owner: NewUserInput!
-  type: String!
-  logo: String
-  idNat: String
-  detail: String
-  email: String
-}
 input UpdateCompanyInput {
   name: String
   address: String
+  phone: String
+  email: String
+  description: String
   type: String
   logo: String
-  idNat: String
-  detail: String
-  email: String
-}
-input NewProductInput {
-  name: String!
-  imageUrl: String
-  priceIn: Float!
-  priceOut: Float!
-  discount: Float!
-  stockMin: Float!
-  stock: Float!
-  category: String
-  unite: String
-}
-
-input UpdateProductInput {
-  name: String
-  imageUrl: String
-  priceIn: Float
-  priceOut: Float
-  discount: Float
-  category: String
-  unite: String
-}
-
-input NewFournisseurInput {
-  name: String!
-  phone: String!
-  city: String!
-}
-input UpdateFournisseurInput {
-  name: String
-  phone: String
-  city: String
-}
-input NewClientInput {
-  name: String!
-  phone: String!
-  note: String!
-}
-
-input UpdateClientInput {
-  name: String
-  phone: String
-  note: String
-}
-
-input ClientInput {
-  name: String!
-  phone: String!
-  note: String!
-}
-
-input ProductInput {
-  id: ID!
-  name: String!
-  imageUrl: String
-  priceIn: Float!
-  priceOut: Float!
-
-  category: String
-  unite: String
-}
-
-input ProductInBasketInput {
-  product: ProductInput!
-  count: Float!
-}
-
-input NewSaleInput {
-  basket: [ProductInBasketInput!]!
-  pricePayed: Float!
-  priceToPay: Float!
-  client: ClientInput
-}
-
-input PriceProductEvolutionInput {
-  product: String!
-  price: Float!
-  discount: Float!
-  date: Date!
-}
-
-type Query {
-  users: [User!]! @auth
-  user(phone: String!): User
-  me: User! @auth
-
-  #company
-  companies: [Company!]! @auth
-  company(id: ID, name: String, code: String): Company @auth
-
-  #sales
-  sales: [Sale!]! @auth
-  sale(id: String): Sale @auth
-
-  #Approvisionnement
-  approvisionements: [Approvisionement!]! @auth
-
-  #Stock mouvements
-  mouvementStock: [MouvementStock!]! @auth
-  stock: [Stock!]! @auth
-
-  # product
-  product: [Product!]! @auth
-
-  #caisse:
-  caisse: Caisse!
-  caisseTrans: [Trans!]!
-}
-
-type Mutation {
-  #user
-  createAccount(data: NewCompanyInput!): Auth!
-  # sendVerificationUserAccount(phone: String!): Boolean!
-  # verifyUserAccount(phone: String!, code: String!): Boolean!
-  changePassword(phone: String!, code: String!, password: String!): Boolean!
-  loginUser(phone: String!, password: String!): Auth!
-  blockUserAccount(id: ID): Boolean! @auth
-  updateUser(id: ID!, data: UpdateUserInput!): Boolean! @auth
-
-  #company
-  #createUser(data: NewUserInput!): Boolean! @auth
-  updateCompany(id: ID!, data: UpdateCompanyInput): Boolean! @auth
-
-  #appro
-
-  createProduct(data: NewProductInput!): Boolean! @auth
-  updateProduct(id: ID!, data: UpdateProductInput!): Boolean! @auth
-  #updatePrice(id: ID!, data: PriceProductEvolutionInput!): Boolean! @auth
-
-  # #vente
-  # sell(data: NewSaleInput!): Boolean! @auth
-
-  # #stock
-  # addInStock(id: ID!, idProduct: String, quantity: Float!): Boolean! @auth
-  # removeInStock(id: ID!): Boolean! @auth
-
-  # #actions mouvement
-  # rechargeCaisse(amount: Float!, libel: String!): Boolean! @auth
-  # withdrawCaisse(amount: Float!, libel: String!): Boolean! @auth
-  # subscribe(code: String!): Boolean! @auth
-}
-
-input NewCompany {
-  name: String!
-  category: String!
-  city: String!
-  address: String!
-  contacts: [String!]!
-  stateIds: NewStateIdentity!
-  logo: String!
-}
-
-input NewStateIdentity {
   rccm: String
   idNat: String
   idCommerce: String
 }
 
-input LoginData {
+input CreateStoreInput {
+  name: String!
+  address: String!
   phone: String!
-  password: String!
+}
+
+input UpdateStoreInput {
+  name: String
+  address: String
+  phone: String
+}
+
+input CreateProductInput {
+  name: String!
+  mark: String!
+  priceVente: Float!
+  priceAchat: Float!
+  stock: Float!
+  storeId: String! # Store auquel appartient le produit
+}
+
+input UpdateProductInput {
+  name: String
+  mark: String
+  priceVente: Float
+  priceAchat: Float
+  stock: Float
+}
+
+input CreateClientInput {
+  name: String!
+  phone: String!
+  storeId: String! # Store auquel appartient le client
+}
+
+input UpdateClientInput {
+  name: String
+  phone: String
+}
+
+input CreateProviderInput {
+  name: String!
+  phone: String!
+  address: String!
+  storeId: String! # Store auquel appartient le fournisseur
+}
+
+input UpdateProviderInput {
+  name: String
+  phone: String
+  address: String
+}
+
+input FactureProductInput {
+  productId: String!
+  quantity: Int!
+  price: Float!
+}
+
+input CreateFactureInput {
+  products: [FactureProductInput!]!
+  clientId: String!
+  storeId: String! # Store pour lequel la facture est créée
+  quantity: Int!
+  price: Float!
+  currency: String!
+  date: String!
+}
+
+input UpdateFactureInput {
+  products: [FactureProductInput!]
+  clientId: String
+  quantity: Int
+  price: Float
+  currency: String
+  date: String
+}
+
+input CreateRapportStoreInput {
+  productId: String!
+  storeId: String! # Store pour lequel le rapport est créé
+  quantity: Float!
+  type: String! # "entree" ou "sortie"
+  date: String!
+}
+
+# ============ QUERIES ============
+
+type Query {
+  # Auth
+  me: User! @auth
+  
+  # Users
+  users: [User!]! @auth
+  user(id: ID!): User @auth
+  
+  # Company
+  company: Company! @auth
+  
+  # Stores
+  stores: [Store!]! @auth
+  store(id: ID!): Store @auth
+  
+  # Products
+  products(storeId: String): [Product!]! @auth # Si storeId non fourni, retourne les produits des stores accessibles
+  product(id: ID!): Product @auth
+  
+  # Clients
+  clients(storeId: String): [Client!]! @auth # Si storeId non fourni, retourne les clients des stores accessibles
+  client(id: ID!): Client @auth
+  
+  # Providers
+  providers(storeId: String): [Provider!]! @auth # Si storeId non fourni, retourne les fournisseurs des stores accessibles
+  provider(id: ID!): Provider @auth
+  
+  # Factures
+  factures(storeId: String): [Facture!]! @auth # Si storeId non fourni, retourne les factures des stores accessibles
+  facture(id: ID!): Facture @auth
+  
+  # RapportStore
+  rapportStore(storeId: String): [RapportStore!]! @auth # Si storeId non fourni, retourne les rapports des stores accessibles
+  rapportStoreById(id: ID!): RapportStore @auth
+}
+
+# ============ MUTATIONS ============
+
+type Mutation {
+  # Auth
+  login(phone: String!, password: String!): AuthResponse!
+  register(input: RegisterInput!): AuthResponse!
+  logout: Boolean! @auth
+  
+  # Users
+  createUser(input: CreateUserInput!): User! @auth
+  updateUser(id: ID!, input: UpdateUserInput!): User! @auth
+  deleteUser(id: ID!): Boolean! @auth
+  blockUser(id: ID!): User! @auth
+  unblockUser(id: ID!): User! @auth
+  assignUserToStore(userId: ID!, storeId: ID!): User! @auth # Assigner un utilisateur User à un store
+  
+  # Company
+  updateCompany(input: UpdateCompanyInput!): Company! @auth
+  
+  # Stores
+  createStore(input: CreateStoreInput!): Store! @auth
+  updateStore(id: ID!, input: UpdateStoreInput!): Store! @auth
+  deleteStore(id: ID!): Boolean! @auth
+  
+  # Products
+  createProduct(input: CreateProductInput!): Product! @auth
+  updateProduct(id: ID!, input: UpdateProductInput!): Product! @auth
+  deleteProduct(id: ID!): Boolean! @auth
+  
+  # Clients
+  createClient(input: CreateClientInput!): Client! @auth
+  updateClient(id: ID!, input: UpdateClientInput!): Client! @auth
+  deleteClient(id: ID!): Boolean! @auth
+  
+  # Providers
+  createProvider(input: CreateProviderInput!): Provider! @auth
+  updateProvider(id: ID!, input: UpdateProviderInput!): Provider! @auth
+  deleteProvider(id: ID!): Boolean! @auth
+  
+  # Factures
+  createFacture(input: CreateFactureInput!): Facture! @auth
+  updateFacture(id: ID!, input: UpdateFactureInput!): Facture! @auth
+  deleteFacture(id: ID!): Boolean! @auth
+  
+  # RapportStore
+  createRapportStore(input: CreateRapportStoreInput!): RapportStore! @auth
+  deleteRapportStore(id: ID!): Boolean! @auth
 }

@@ -2,7 +2,7 @@ package graph
 
 import (
 	"context"
-	"rangoapp/graph/model"
+	"rangoapp/database"
 	"rangoapp/middlewares"
 )
 
@@ -10,16 +10,59 @@ import (
 //
 // It serves as dependency injection for your app, add any dependencies you require here.
 
-type Resolver struct{}
+type Resolver struct {
+	DB *database.DB
+}
 
-func (r *Resolver) GetUserFromContext(ctx context.Context) (*model.User, error) {
-	//fmt.Println("Get data from context")
+func (r *Resolver) GetUserFromContext(ctx context.Context) (*database.User, error) {
 	raw := middlewares.CtxValue(ctx)
-	//fmt.Println(raw.ID)
+	if raw == nil {
+		return nil, nil
+	}
 
-	user := db.FindUser(raw.ID)
-
-	//fmt.Println(user)
+	user, err := r.DB.FindUserByID(raw.ID)
+	if err != nil {
+		return nil, err
+	}
 
 	return user, nil
+}
+
+func (r *Resolver) GetAccessibleStoreIDs(ctx context.Context) ([]string, error) {
+	raw := middlewares.CtxValue(ctx)
+	if raw == nil {
+		return nil, nil
+	}
+
+	// If Admin, return all storeIDs
+	if raw.Role == "Admin" {
+		return raw.StoreIDs, nil
+	}
+
+	// If User, return only assignedStoreID
+	if raw.AssignedStoreID != "" {
+		return []string{raw.AssignedStoreID}, nil
+	}
+
+	return []string{}, nil
+}
+
+func (r *Resolver) HasStoreAccess(ctx context.Context, storeID string) (bool, error) {
+	raw := middlewares.CtxValue(ctx)
+	if raw == nil {
+		return false, nil
+	}
+
+	// Admin has access to all stores in their company
+	if raw.Role == "Admin" {
+		for _, id := range raw.StoreIDs {
+			if id == storeID {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
+	// User has access only to assigned store
+	return raw.AssignedStoreID == storeID, nil
 }
