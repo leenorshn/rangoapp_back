@@ -6,114 +6,1434 @@ package graph
 
 import (
 	"context"
-	"fmt"
 	"rangoapp/database"
 	"rangoapp/graph/model"
+	"rangoapp/services"
+	"rangoapp/validators"
+	"time"
+
+	"github.com/vektah/gqlparser/v2/gqlerror"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// CreateAccount is the resolver for the createAccount field.
-func (r *mutationResolver) CreateAccount(ctx context.Context, data model.NewCompanyInput) (*model.Auth, error) {
-	panic(fmt.Errorf("not implemented: CreateAccount - createAccount"))
+// Login is the resolver for the login field.
+func (r *mutationResolver) Login(ctx context.Context, phone string, password string) (*model.AuthResponse, error) {
+	if err := validators.ValidateLoginInput(phone, password); err != nil {
+		return nil, err
+	}
+	authService := services.NewAuthService(r.DB)
+	response, err := authService.Login(ctx, phone, password)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.AuthResponse{
+		Token: response.Token,
+		User:  convertUserToGraphQL(response.User),
+	}, nil
 }
 
-// ChangePassword is the resolver for the changePassword field.
-func (r *mutationResolver) ChangePassword(ctx context.Context, phone string, code string, password string) (bool, error) {
-	panic(fmt.Errorf("not implemented: ChangePassword - changePassword"))
+// Register is the resolver for the register field.
+func (r *mutationResolver) Register(ctx context.Context, input model.RegisterInput) (*model.AuthResponse, error) {
+	if err := validators.ValidateRegisterInput(&input); err != nil {
+		return nil, err
+	}
+	authService := services.NewAuthService(r.DB)
+	registerInput := services.RegisterInput{
+		Email:              input.Email,
+		Password:           input.Password,
+		Name:               input.Name,
+		Phone:              input.Phone,
+		CompanyName:        input.CompanyName,
+		CompanyAddress:     input.CompanyAddress,
+		CompanyPhone:       input.CompanyPhone,
+		CompanyDescription: input.CompanyDescription,
+		CompanyType:        input.CompanyType,
+		CompanyEmail:       input.CompanyEmail,
+		CompanyLogo:        input.CompanyLogo,
+		CompanyRccm:        input.CompanyRccm,
+		CompanyIdNat:       input.CompanyIDNat,
+		CompanyIdCommerce:  input.CompanyIDCommerce,
+		StoreName:          input.StoreName,
+		StoreAddress:       input.StoreAddress,
+		StorePhone:         input.StorePhone,
+	}
+
+	response, err := authService.Register(ctx, registerInput)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.AuthResponse{
+		Token: response.Token,
+		User:  convertUserToGraphQL(response.User),
+	}, nil
 }
 
-// LoginUser is the resolver for the loginUser field.
-func (r *mutationResolver) LoginUser(ctx context.Context, phone string, password string) (*model.Auth, error) {
-	panic(fmt.Errorf("not implemented: LoginUser - loginUser"))
+// Logout is the resolver for the logout field.
+func (r *mutationResolver) Logout(ctx context.Context) (bool, error) {
+	// JWT is stateless, so logout is just a success response
+	// Client should remove the token
+	return true, nil
 }
 
-// BlockUserAccount is the resolver for the blockUserAccount field.
-func (r *mutationResolver) BlockUserAccount(ctx context.Context, id *string) (bool, error) {
-	panic(fmt.Errorf("not implemented: BlockUserAccount - blockUserAccount"))
+// CreateUser is the resolver for the createUser field.
+func (r *mutationResolver) CreateUser(ctx context.Context, input model.CreateUserInput) (*model.User, error) {
+	if err := validators.ValidateCreateUserInput(&input); err != nil {
+		return nil, err
+	}
+	// Get current user from context
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can create users
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can create users")
+	}
+
+	var storeIDs []primitive.ObjectID
+	var assignedStoreID *primitive.ObjectID
+
+	if input.Role == "Admin" {
+		// Admin gets all stores of the company
+		stores, err := r.DB.FindStoresByCompanyID(currentUser.CompanyID.Hex())
+		if err != nil {
+			return nil, err
+		}
+		for _, store := range stores {
+			storeIDs = append(storeIDs, store.ID)
+		}
+	} else if input.Role == "User" {
+		// User gets assigned to a specific store
+		if input.StoreID != nil {
+			storeID, err := primitive.ObjectIDFromHex(*input.StoreID)
+			if err != nil {
+				return nil, gqlerror.Errorf("Invalid store ID")
+			}
+			// Verify store belongs to company
+			hasAccess, err := r.DB.VerifyStoreAccess(*input.StoreID, currentUser.CompanyID.Hex())
+			if err != nil || !hasAccess {
+				return nil, gqlerror.Errorf("Store does not belong to your company")
+			}
+			storeIDs = []primitive.ObjectID{storeID}
+			assignedStoreID = &storeID
+		}
+	}
+
+	email := ""
+	if input.Email != nil {
+		email = *input.Email
+	}
+
+	user, err := r.DB.CreateUser(
+		input.Name,
+		input.Phone,
+		email,
+		input.Password,
+		input.Role,
+		currentUser.CompanyID,
+		storeIDs,
+		assignedStoreID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertUserToGraphQL(user), nil
 }
 
 // UpdateUser is the resolver for the updateUser field.
-func (r *mutationResolver) UpdateUser(ctx context.Context, id string, data model.UpdateUserInput) (bool, error) {
-	panic(fmt.Errorf("not implemented: UpdateUser - updateUser"))
+func (r *mutationResolver) UpdateUser(ctx context.Context, id string, input model.UpdateUserInput) (*model.User, error) {
+	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateUpdateUserInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can update users
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can update users")
+	}
+
+	var assignedStoreID *primitive.ObjectID
+	if input.StoreID != nil {
+		storeID, err := primitive.ObjectIDFromHex(*input.StoreID)
+		if err != nil {
+			return nil, gqlerror.Errorf("Invalid store ID")
+		}
+		assignedStoreID = &storeID
+	}
+
+	user, err := r.DB.UpdateUser(
+		id,
+		input.Name,
+		input.Phone,
+		input.Email,
+		input.Role,
+		assignedStoreID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertUserToGraphQL(user), nil
+}
+
+// DeleteUser is the resolver for the deleteUser field.
+func (r *mutationResolver) DeleteUser(ctx context.Context, id string) (bool, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can delete users
+	if currentUser.Role != "Admin" {
+		return false, gqlerror.Errorf("Only Admin can delete users")
+	}
+
+	err = r.DB.DeleteUser(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// BlockUser is the resolver for the blockUser field.
+func (r *mutationResolver) BlockUser(ctx context.Context, id string) (*model.User, error) {
+	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can block users
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can block users")
+	}
+
+	user, err := r.DB.BlockUser(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertUserToGraphQL(user), nil
+}
+
+// UnblockUser is the resolver for the unblockUser field.
+func (r *mutationResolver) UnblockUser(ctx context.Context, id string) (*model.User, error) {
+	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can unblock users
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can unblock users")
+	}
+
+	user, err := r.DB.UnblockUser(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertUserToGraphQL(user), nil
+}
+
+// AssignUserToStore is the resolver for the assignUserToStore field.
+func (r *mutationResolver) AssignUserToStore(ctx context.Context, userID string, storeID string) (*model.User, error) {
+	if err := validators.ValidateObjectID(userID, "User ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateObjectID(storeID, "Store ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can assign users to stores
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can assign users to stores")
+	}
+
+	storeObjectID, err := primitive.ObjectIDFromHex(storeID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	user, err := r.DB.AssignUserToStore(userID, storeObjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertUserToGraphQL(user), nil
 }
 
 // UpdateCompany is the resolver for the updateCompany field.
-func (r *mutationResolver) UpdateCompany(ctx context.Context, id string, data *model.UpdateCompanyInput) (bool, error) {
-	panic(fmt.Errorf("not implemented: UpdateCompany - updateCompany"))
+func (r *mutationResolver) UpdateCompany(ctx context.Context, input model.UpdateCompanyInput) (*model.Company, error) {
+	if err := validators.ValidateUpdateCompanyInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can update company
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can update company")
+	}
+
+	company, err := r.DB.UpdateCompany(
+		currentUser.CompanyID.Hex(),
+		input.Name,
+		input.Address,
+		input.Phone,
+		input.Email,
+		input.Description,
+		input.Type,
+		input.Logo,
+		input.Rccm,
+		input.IDNat,
+		input.IDCommerce,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertCompanyToGraphQL(company, r.DB, true), nil
+}
+
+// CreateStore is the resolver for the createStore field.
+func (r *mutationResolver) CreateStore(ctx context.Context, input model.CreateStoreInput) (*model.Store, error) {
+	if err := validators.ValidateCreateStoreInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can create stores
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can create stores")
+	}
+
+	store, err := r.DB.CreateStore(
+		input.Name,
+		input.Address,
+		input.Phone,
+		currentUser.CompanyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update all Admin users' storeIDs
+	admins, err := r.DB.FindUsersByCompanyID(currentUser.CompanyID.Hex())
+	if err == nil {
+		for _, admin := range admins {
+			if admin.Role == "Admin" {
+				stores, _ := r.DB.FindStoresByCompanyID(currentUser.CompanyID.Hex())
+				var storeIDs []primitive.ObjectID
+				for _, s := range stores {
+					storeIDs = append(storeIDs, s.ID)
+				}
+				r.DB.UpdateUserStoreIDs(admin.ID.Hex(), storeIDs)
+			}
+		}
+	}
+
+	return convertStoreToGraphQL(store, r.DB, true), nil
+}
+
+// UpdateStore is the resolver for the updateStore field.
+func (r *mutationResolver) UpdateStore(ctx context.Context, id string, input model.UpdateStoreInput) (*model.Store, error) {
+	if err := validators.ValidateObjectID(id, "Store ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateUpdateStoreInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can update stores
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can update stores")
+	}
+
+	// Verify store access
+	hasAccess, err := r.DB.VerifyStoreAccess(id, currentUser.CompanyID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("Store does not belong to your company")
+	}
+
+	store, err := r.DB.UpdateStore(id, input.Name, input.Address, input.Phone)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertStoreToGraphQL(store, r.DB, true), nil
+}
+
+// DeleteStore is the resolver for the deleteStore field.
+func (r *mutationResolver) DeleteStore(ctx context.Context, id string) (bool, error) {
+	if err := validators.ValidateObjectID(id, "Store ID"); err != nil {
+		return false, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can delete stores
+	if currentUser.Role != "Admin" {
+		return false, gqlerror.Errorf("Only Admin can delete stores")
+	}
+
+	// Verify store access
+	hasAccess, err := r.DB.VerifyStoreAccess(id, currentUser.CompanyID.Hex())
+	if err != nil || !hasAccess {
+		return false, gqlerror.Errorf("Store does not belong to your company")
+	}
+
+	err = r.DB.DeleteStore(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // CreateProduct is the resolver for the createProduct field.
-func (r *mutationResolver) CreateProduct(ctx context.Context, data model.NewProductInput) (bool, error) {
-	panic(fmt.Errorf("not implemented: CreateProduct - createProduct"))
+func (r *mutationResolver) CreateProduct(ctx context.Context, input model.CreateProductInput) (*model.Product, error) {
+	if err := validators.ValidateCreateProductInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	product, err := r.DB.CreateProduct(
+		input.Name,
+		input.Mark,
+		input.PriceVente,
+		input.PriceAchat,
+		input.Stock,
+		storeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertProductToGraphQL(product, r.DB), nil
 }
 
 // UpdateProduct is the resolver for the updateProduct field.
-func (r *mutationResolver) UpdateProduct(ctx context.Context, id string, data model.UpdateProductInput) (bool, error) {
-	panic(fmt.Errorf("not implemented: UpdateProduct - updateProduct"))
+func (r *mutationResolver) UpdateProduct(ctx context.Context, id string, input model.UpdateProductInput) (*model.Product, error) {
+	if err := validators.ValidateObjectID(id, "Product ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateUpdateProductInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get product to verify store access
+	product, err := r.DB.FindProductByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, product.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this product's store")
+	}
+
+	updatedProduct, err := r.DB.UpdateProduct(
+		id,
+		input.Name,
+		input.Mark,
+		input.PriceVente,
+		input.PriceAchat,
+		input.Stock,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertProductToGraphQL(updatedProduct, r.DB), nil
 }
 
-// Users is the resolver for the users field.
-func (r *queryResolver) Users(ctx context.Context) ([]*model.User, error) {
-	panic(fmt.Errorf("not implemented: Users - users"))
+// DeleteProduct is the resolver for the deleteProduct field.
+func (r *mutationResolver) DeleteProduct(ctx context.Context, id string) (bool, error) {
+	if err := validators.ValidateObjectID(id, "Product ID"); err != nil {
+		return false, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get product to verify store access
+	product, err := r.DB.FindProductByID(id)
+	if err != nil {
+		return false, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, product.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return false, gqlerror.Errorf("You don't have access to this product's store")
+	}
+
+	err = r.DB.DeleteProduct(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
-// User is the resolver for the user field.
-func (r *queryResolver) User(ctx context.Context, phone string) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: User - user"))
+// CreateClient is the resolver for the createClient field.
+func (r *mutationResolver) CreateClient(ctx context.Context, input model.CreateClientInput) (*model.Client, error) {
+	if err := validators.ValidateCreateClientInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	client, err := r.DB.CreateClient(input.Name, input.Phone, storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertClientToGraphQL(client, r.DB), nil
+}
+
+// UpdateClient is the resolver for the updateClient field.
+func (r *mutationResolver) UpdateClient(ctx context.Context, id string, input model.UpdateClientInput) (*model.Client, error) {
+	if err := validators.ValidateObjectID(id, "Client ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateUpdateClientInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get client to verify store access
+	client, err := r.DB.FindClientByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, client.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this client's store")
+	}
+
+	updatedClient, err := r.DB.UpdateClient(id, input.Name, input.Phone)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertClientToGraphQL(updatedClient, r.DB), nil
+}
+
+// DeleteClient is the resolver for the deleteClient field.
+func (r *mutationResolver) DeleteClient(ctx context.Context, id string) (bool, error) {
+	if err := validators.ValidateObjectID(id, "Client ID"); err != nil {
+		return false, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get client to verify store access
+	client, err := r.DB.FindClientByID(id)
+	if err != nil {
+		return false, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, client.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return false, gqlerror.Errorf("You don't have access to this client's store")
+	}
+
+	err = r.DB.DeleteClient(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// CreateProvider is the resolver for the createProvider field.
+func (r *mutationResolver) CreateProvider(ctx context.Context, input model.CreateProviderInput) (*model.Provider, error) {
+	if err := validators.ValidateCreateProviderInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	provider, err := r.DB.CreateProvider(input.Name, input.Phone, input.Address, storeID)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertProviderToGraphQL(provider, r.DB), nil
+}
+
+// UpdateProvider is the resolver for the updateProvider field.
+func (r *mutationResolver) UpdateProvider(ctx context.Context, id string, input model.UpdateProviderInput) (*model.Provider, error) {
+	if err := validators.ValidateObjectID(id, "Provider ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateUpdateProviderInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get provider to verify store access
+	provider, err := r.DB.FindProviderByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, provider.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this provider's store")
+	}
+
+	updatedProvider, err := r.DB.UpdateProvider(id, input.Name, input.Phone, input.Address)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertProviderToGraphQL(updatedProvider, r.DB), nil
+}
+
+// DeleteProvider is the resolver for the deleteProvider field.
+func (r *mutationResolver) DeleteProvider(ctx context.Context, id string) (bool, error) {
+	if err := validators.ValidateObjectID(id, "Provider ID"); err != nil {
+		return false, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get provider to verify store access
+	provider, err := r.DB.FindProviderByID(id)
+	if err != nil {
+		return false, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, provider.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return false, gqlerror.Errorf("You don't have access to this provider's store")
+	}
+
+	err = r.DB.DeleteProvider(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// CreateFacture is the resolver for the createFacture field.
+func (r *mutationResolver) CreateFacture(ctx context.Context, input model.CreateFactureInput) (*model.Facture, error) {
+	if err := validators.ValidateCreateFactureInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	clientID, err := primitive.ObjectIDFromHex(input.ClientID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid client ID")
+	}
+
+	// Parse date
+	date, err := time.Parse(time.RFC3339, input.Date)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid date format")
+	}
+
+	// Convert products
+	var factureProducts []database.FactureProduct
+	for _, p := range input.Products {
+		productID, err := primitive.ObjectIDFromHex(p.ProductID)
+		if err != nil {
+			return nil, gqlerror.Errorf("Invalid product ID: %s", p.ProductID)
+		}
+
+		// Verify product belongs to store
+		product, err := r.DB.FindProductByID(p.ProductID)
+		if err != nil {
+			return nil, gqlerror.Errorf("Product not found: %s", p.ProductID)
+		}
+		if product.StoreID != storeID {
+			return nil, gqlerror.Errorf("Product %s does not belong to store", p.ProductID)
+		}
+
+		// Check stock
+		if product.Stock < float64(p.Quantity) {
+			return nil, gqlerror.Errorf("Insufficient stock for product %s", p.ProductID)
+		}
+
+		factureProducts = append(factureProducts, database.FactureProduct{
+			ProductID: productID,
+			Quantity:  p.Quantity,
+			Price:     p.Price,
+		})
+
+		// Update stock
+		err = r.DB.UpdateProductStock(p.ProductID, -float64(p.Quantity))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Create facture
+	facture := &database.Facture{
+		ID:        primitive.NewObjectID(),
+		Products:  factureProducts,
+		Quantity:  input.Quantity,
+		Date:      date,
+		Price:     input.Price,
+		Currency:  input.Currency,
+		ClientID:  clientID,
+		StoreID:   storeID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	createdFacture, err := r.DB.CreateFacture(facture)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertFactureToGraphQL(createdFacture, r.DB), nil
+}
+
+// UpdateFacture is the resolver for the updateFacture field.
+func (r *mutationResolver) UpdateFacture(ctx context.Context, id string, input model.UpdateFactureInput) (*model.Facture, error) {
+	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateUpdateFactureInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get facture to verify store access
+	facture, err := r.DB.FindFactureByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, facture.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this facture's store")
+	}
+
+	var factureProducts []database.FactureProduct
+	if input.Products != nil {
+		for _, p := range input.Products {
+			productID, err := primitive.ObjectIDFromHex(p.ProductID)
+			if err != nil {
+				return nil, gqlerror.Errorf("Invalid product ID")
+			}
+			factureProducts = append(factureProducts, database.FactureProduct{
+				ProductID: productID,
+				Quantity:  p.Quantity,
+				Price:     p.Price,
+			})
+		}
+	}
+
+	var clientID *primitive.ObjectID
+	if input.ClientID != nil {
+		id, err := primitive.ObjectIDFromHex(*input.ClientID)
+		if err != nil {
+			return nil, gqlerror.Errorf("Invalid client ID")
+		}
+		clientID = &id
+	}
+
+	var factureDate *time.Time
+	if input.Date != nil {
+		date, err := time.Parse(time.RFC3339, *input.Date)
+		if err != nil {
+			return nil, gqlerror.Errorf("Invalid date format")
+		}
+		factureDate = &date
+	}
+
+	var quantity *int
+	if input.Quantity != nil {
+		quantity = input.Quantity
+	}
+
+	updatedFacture, err := r.DB.UpdateFacture(
+		id,
+		factureProducts,
+		clientID,
+		quantity,
+		input.Price,
+		input.Currency,
+		factureDate,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertFactureToGraphQL(updatedFacture, r.DB), nil
+}
+
+// DeleteFacture is the resolver for the deleteFacture field.
+func (r *mutationResolver) DeleteFacture(ctx context.Context, id string) (bool, error) {
+	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
+		return false, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get facture to verify store access
+	facture, err := r.DB.FindFactureByID(id)
+	if err != nil {
+		return false, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, facture.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return false, gqlerror.Errorf("You don't have access to this facture's store")
+	}
+
+	err = r.DB.DeleteFacture(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// CreateRapportStore is the resolver for the createRapportStore field.
+func (r *mutationResolver) CreateRapportStore(ctx context.Context, input model.CreateRapportStoreInput) (*model.RapportStore, error) {
+	if err := validators.ValidateCreateRapportStoreInput(&input); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	productID, err := primitive.ObjectIDFromHex(input.ProductID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid product ID")
+	}
+
+	// Verify product belongs to store
+	product, err := r.DB.FindProductByID(input.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	if product.StoreID != storeID {
+		return nil, gqlerror.Errorf("Product does not belong to store")
+	}
+
+	// Parse date
+	date, err := time.Parse(time.RFC3339, input.Date)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid date format")
+	}
+
+	// Validate type
+	if input.Type != "entree" && input.Type != "sortie" {
+		return nil, gqlerror.Errorf("Type must be 'entree' or 'sortie'")
+	}
+
+	rapport := &database.RapportStore{
+		ID:        primitive.NewObjectID(),
+		Type:      input.Type,
+		ProductID: productID,
+		Quantity:  input.Quantity,
+		Date:      date,
+		StoreID:   storeID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	createdRapport, err := r.DB.CreateRapportStore(rapport)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update product stock
+	stockChange := input.Quantity
+	if input.Type == "sortie" {
+		stockChange = -input.Quantity
+	}
+	err = r.DB.UpdateProductStock(input.ProductID, stockChange)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertRapportStoreToGraphQL(createdRapport, r.DB), nil
+}
+
+// DeleteRapportStore is the resolver for the deleteRapportStore field.
+func (r *mutationResolver) DeleteRapportStore(ctx context.Context, id string) (bool, error) {
+	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
+		return false, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return false, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get rapport to verify store access
+	rapport, err := r.DB.FindRapportStoreByID(id)
+	if err != nil {
+		return false, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, rapport.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return false, gqlerror.Errorf("You don't have access to this rapport's store")
+	}
+
+	err = r.DB.DeleteRapportStore(id)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // Me is the resolver for the me field.
 func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: Me - me"))
+	user, err := r.GetUserFromContext(ctx)
+	if err != nil || user == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	return convertUserToGraphQL(user), nil
 }
 
-// Companies is the resolver for the companies field.
-func (r *queryResolver) Companies(ctx context.Context) ([]*model.Company, error) {
-	panic(fmt.Errorf("not implemented: Companies - companies"))
+// Users is the resolver for the users field.
+func (r *queryResolver) Users(ctx context.Context) ([]*model.User, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can see all users
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can view all users")
+	}
+
+	users, err := r.DB.FindUsersByCompanyID(currentUser.CompanyID.Hex())
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.User
+	for _, user := range users {
+		result = append(result, convertUserToGraphQL(user))
+	}
+
+	return result, nil
+}
+
+// User is the resolver for the user field.
+func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error) {
+	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	user, err := r.DB.FindUserByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify user belongs to same company
+	if user.CompanyID != currentUser.CompanyID {
+		return nil, gqlerror.Errorf("User not found")
+	}
+
+	return convertUserToGraphQL(user), nil
 }
 
 // Company is the resolver for the company field.
-func (r *queryResolver) Company(ctx context.Context, id *string, name *string, code *string) (*model.Company, error) {
-	panic(fmt.Errorf("not implemented: Company - company"))
+func (r *queryResolver) Company(ctx context.Context) (*model.Company, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	company, err := r.DB.FindCompanyByID(currentUser.CompanyID.Hex())
+	if err != nil {
+		return nil, err
+	}
+
+	return convertCompanyToGraphQL(company, r.DB, true), nil
 }
 
-// Sales is the resolver for the sales field.
-func (r *queryResolver) Sales(ctx context.Context) ([]*model.Sale, error) {
-	panic(fmt.Errorf("not implemented: Sales - sales"))
+// Stores is the resolver for the stores field.
+func (r *queryResolver) Stores(ctx context.Context) ([]*model.Store, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var stores []*database.Store
+	if currentUser.Role == "Admin" {
+		stores, err = r.DB.FindStoresByCompanyID(currentUser.CompanyID.Hex())
+	} else {
+		// User can only see assigned store
+		if currentUser.AssignedStoreID != nil {
+			store, err := r.DB.FindStoreByID(currentUser.AssignedStoreID.Hex())
+			if err == nil {
+				stores = []*database.Store{store}
+			}
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.Store
+	for _, store := range stores {
+		result = append(result, convertStoreToGraphQL(store, r.DB, true))
+	}
+
+	return result, nil
 }
 
-// Sale is the resolver for the sale field.
-func (r *queryResolver) Sale(ctx context.Context, id *string) (*model.Sale, error) {
-	panic(fmt.Errorf("not implemented: Sale - sale"))
+// Store is the resolver for the store field.
+func (r *queryResolver) Store(ctx context.Context, id string) (*model.Store, error) {
+	if err := validators.ValidateObjectID(id, "Store ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, id)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	store, err := r.DB.FindStoreByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertStoreToGraphQL(store, r.DB, true), nil
 }
 
-// Approvisionements is the resolver for the approvisionements field.
-func (r *queryResolver) Approvisionements(ctx context.Context) ([]*model.Approvisionement, error) {
-	panic(fmt.Errorf("not implemented: Approvisionements - approvisionements"))
-}
+// Products is the resolver for the products field.
+func (r *queryResolver) Products(ctx context.Context, storeID *string) ([]*model.Product, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
 
-// MouvementStock is the resolver for the mouvementStock field.
-func (r *queryResolver) MouvementStock(ctx context.Context) ([]*model.MouvementStock, error) {
-	panic(fmt.Errorf("not implemented: MouvementStock - mouvementStock"))
-}
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
+			return nil, err
+		}
+		// Verify access to specific store
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		// Get accessible stores
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
 
-// Stock is the resolver for the stock field.
-func (r *queryResolver) Stock(ctx context.Context) ([]*model.Stock, error) {
-	panic(fmt.Errorf("not implemented: Stock - stock"))
+	products, err := r.DB.FindProductsByStoreIDs(storeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.Product
+	for _, product := range products {
+		result = append(result, convertProductToGraphQL(product, r.DB))
+	}
+
+	return result, nil
 }
 
 // Product is the resolver for the product field.
-func (r *queryResolver) Product(ctx context.Context) ([]*model.Product, error) {
-	panic(fmt.Errorf("not implemented: Product - product"))
+func (r *queryResolver) Product(ctx context.Context, id string) (*model.Product, error) {
+	if err := validators.ValidateObjectID(id, "Product ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	product, err := r.DB.FindProductByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, product.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this product's store")
+	}
+
+	return convertProductToGraphQL(product, r.DB), nil
 }
 
-// Caisse is the resolver for the caisse field.
-func (r *queryResolver) Caisse(ctx context.Context) (*model.Caisse, error) {
-	panic(fmt.Errorf("not implemented: Caisse - caisse"))
+// Clients is the resolver for the clients field.
+func (r *queryResolver) Clients(ctx context.Context, storeID *string) ([]*model.Client, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	clients, err := r.DB.FindClientsByStoreIDs(storeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.Client
+	for _, client := range clients {
+		result = append(result, convertClientToGraphQL(client, r.DB))
+	}
+
+	return result, nil
 }
 
-// CaisseTrans is the resolver for the caisseTrans field.
-func (r *queryResolver) CaisseTrans(ctx context.Context) ([]*model.Trans, error) {
-	panic(fmt.Errorf("not implemented: CaisseTrans - caisseTrans"))
+// Client is the resolver for the client field.
+func (r *queryResolver) Client(ctx context.Context, id string) (*model.Client, error) {
+	if err := validators.ValidateObjectID(id, "Client ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	client, err := r.DB.FindClientByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, client.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this client's store")
+	}
+
+	return convertClientToGraphQL(client, r.DB), nil
+}
+
+// Providers is the resolver for the providers field.
+func (r *queryResolver) Providers(ctx context.Context, storeID *string) ([]*model.Provider, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	providers, err := r.DB.FindProvidersByStoreIDs(storeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.Provider
+	for _, provider := range providers {
+		result = append(result, convertProviderToGraphQL(provider, r.DB))
+	}
+
+	return result, nil
+}
+
+// Provider is the resolver for the provider field.
+func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provider, error) {
+	if err := validators.ValidateObjectID(id, "Provider ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	provider, err := r.DB.FindProviderByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, provider.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this provider's store")
+	}
+
+	return convertProviderToGraphQL(provider, r.DB), nil
+}
+
+// Factures is the resolver for the factures field.
+func (r *queryResolver) Factures(ctx context.Context, storeID *string) ([]*model.Facture, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	factures, err := r.DB.FindFacturesByStoreIDs(storeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.Facture
+	for _, facture := range factures {
+		result = append(result, convertFactureToGraphQL(facture, r.DB))
+	}
+
+	return result, nil
+}
+
+// Facture is the resolver for the facture field.
+func (r *queryResolver) Facture(ctx context.Context, id string) (*model.Facture, error) {
+	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	facture, err := r.DB.FindFactureByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, facture.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this facture's store")
+	}
+
+	return convertFactureToGraphQL(facture, r.DB), nil
+}
+
+// RapportStore is the resolver for the rapportStore field.
+func (r *queryResolver) RapportStore(ctx context.Context, storeID *string) ([]*model.RapportStore, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	rapports, err := r.DB.FindRapportsByStoreIDs(storeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.RapportStore
+	for _, rapport := range rapports {
+		result = append(result, convertRapportStoreToGraphQL(rapport, r.DB))
+	}
+
+	return result, nil
+}
+
+// RapportStoreByID is the resolver for the rapportStoreById field.
+func (r *queryResolver) RapportStoreByID(ctx context.Context, id string) (*model.RapportStore, error) {
+	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	rapport, err := r.DB.FindRapportStoreByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, rapport.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this rapport's store")
+	}
+
+	return convertRapportStoreToGraphQL(rapport, r.DB), nil
 }
 
 // Mutation returns MutationResolver implementation.
@@ -131,6 +1451,24 @@ type queryResolver struct{ *Resolver }
 //   - When renaming or deleting a resolver the old code will be put in here. You can safely delete
 //     it when you're done.
 //   - You have helper methods in this file. Move them out to keep these resolver files clean.
-var (
-	db = database.ConnectDB()
-)
+func (r *queryResolver) RapportStoreById(ctx context.Context, id string) (*model.RapportStore, error) {
+	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	rapport, err := r.DB.FindRapportStoreByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, rapport.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this rapport's store")
+	}
+
+	return convertRapportStoreToGraphQL(rapport, r.DB), nil
+}

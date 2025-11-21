@@ -23,7 +23,7 @@ type Product struct {
 
 func (db *DB) CreateProduct(name, mark string, priceVente, priceAchat, stock float64, storeID primitive.ObjectID) (*Product, error) {
 	productCollection := colHelper(db, "products")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	// Validate prices

@@ -2,105 +2,182 @@ package database
 
 import (
 	"context"
-	"fmt"
-	"log"
-	"rangoapp/graph/model"
 	"time"
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func (db *DB) InsertTrans(operation string, amount float64, libel, company string, user model.User) (bool, error) {
-	productCollection := colHelper(db, "trans")
-	//caisseCollection := colHelper(db, "sales")
+type Trans struct {
+	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Amount     float64            `bson:"amount" json:"amount"`
+	Operation  string             `bson:"operation" json:"operation"` // "Entree" or "Sortie"
+	Libel      string             `bson:"libel" json:"libel"`
+	OperatorID primitive.ObjectID `bson:"operatorId" json:"operatorId"`
+	StoreID    primitive.ObjectID `bson:"storeId" json:"storeId"`
+	Date       time.Time          `bson:"date" json:"date"`
+	CreatedAt  time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt  time.Time          `bson:"updatedAt" json:"updatedAt"`
+}
 
+type Caisse struct {
+	ID      primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	In      float64            `bson:"in" json:"in"`
+	Out     float64            `bson:"out" json:"out"`
+	StoreID primitive.ObjectID `bson:"storeId" json:"storeId"`
+}
+
+// CreateTrans creates a new cash register transaction
+func (db *DB) CreateTrans(operation string, amount float64, libel string, operatorID, storeID primitive.ObjectID) (*Trans, error) {
+	transCollection := colHelper(db, "trans")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	companyId, err := primitive.ObjectIDFromHex(company)
-	if err != nil {
-		//fmt.Println("Error ", err)
-		return false, gqlerror.Errorf("Erreur inconnue")
+	// Validate operation
+	if operation != "Entree" && operation != "Sortie" {
+		return nil, gqlerror.Errorf("Operation must be 'Entree' or 'Sortie'")
 	}
 
-	res, err := productCollection.InsertOne(ctx, bson.D{
-		{Key: "amount", Value: amount},
-		{Key: "libel", Value: libel},
-		{Key: "operation", Value: operation},
-		{Key: "operator", Value: user},
-		{Key: "company", Value: companyId},
-		{Key: "date", Value: time.Now().Local().String()},
-	})
-
-	if err != nil {
-		return false, gqlerror.Errorf("Erreur d'insertion de donnee")
+	// Validate amount
+	if amount <= 0 {
+		return nil, gqlerror.Errorf("Amount must be greater than 0")
 	}
-	fmt.Println(res.InsertedID)
 
-	return true, nil
+	trans := Trans{
+		ID:         primitive.NewObjectID(),
+		Amount:     amount,
+		Operation:  operation,
+		Libel:      libel,
+		OperatorID: operatorID,
+		StoreID:    storeID,
+		Date:       time.Now(),
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	_, err := transCollection.InsertOne(ctx, trans)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error creating transaction: %v", err)
+	}
+
+	return &trans, nil
 }
 
-func (db *DB) FindCaisseMouments(company string) []*model.Trans {
-
-	tranCollection := colHelper(db, "trans")
+// FindTransByStoreIDs finds all transactions for the given stores
+func (db *DB) FindTransByStoreIDs(storeIDs []primitive.ObjectID) ([]*Trans, error) {
+	transCollection := colHelper(db, "trans")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	companyId, err := primitive.ObjectIDFromHex(company)
+
+	cursor, err := transCollection.Find(ctx, bson.M{"storeId": bson.M{"$in": storeIDs}})
 	if err != nil {
-		//fmt.Println("Error ", err)
-		return nil
+		return nil, gqlerror.Errorf("Error finding transactions: %v", err)
 	}
-	opts := options.Find().SetSort(bson.D{{Key: "company", Value: companyId}})
-	cur, err := tranCollection.Find(ctx, bson.D{}, opts)
+	defer cursor.Close(ctx)
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer cur.Close(ctx)
-	var trans []*model.Trans
-
-	// Get a list of all returned documents and print them out.
-	// See the mongo.Cursor documentation for more examples of using cursors.
-	for cur.Next(ctx) {
-
-		var tran *model.Trans
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if err = cur.Decode(&tran); err != nil {
-			log.Fatal(err)
-		}
-
-		trans = append(trans, tran)
+	var trans []*Trans
+	if err = cursor.All(ctx, &trans); err != nil {
+		return nil, gqlerror.Errorf("Error decoding transactions: %v", err)
 	}
 
-	if err := cur.Err(); err != nil {
-		log.Fatal(err)
-	}
-
-	return trans
+	return trans, nil
 }
 
-func (db *DB) FindCaisse(company string) *model.Caisse {
+// FindTransByID finds a transaction by ID
+func (db *DB) FindTransByID(id string) (*Trans, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid transaction ID")
+	}
 
-	sales := db.FindCaisseMouments(company)
+	transCollection := colHelper(db, "trans")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var trans Trans
+	err = transCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&trans)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, gqlerror.Errorf("Transaction not found")
+		}
+		return nil, gqlerror.Errorf("Error finding transaction: %v", err)
+	}
+
+	return &trans, nil
+}
+
+// FindCaisse calculates the cash register balance for a store
+func (db *DB) FindCaisse(storeID string) (*Caisse, error) {
+	storeObjectID, err := primitive.ObjectIDFromHex(storeID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid store ID")
+	}
+
+	transactions, err := db.FindTransByStoreIDs([]primitive.ObjectID{storeObjectID})
+	if err != nil {
+		return nil, err
+	}
+
 	var mvntIn, mvntOut float64
 
-	for _, s := range sales {
-		if s.Operation == "Entree" {
-			mvntIn = mvntIn + *s.Amount
-		} else {
-			mvntOut = mvntOut - *s.Amount
+	for _, t := range transactions {
+		if t.Operation == "Entree" {
+			mvntIn += t.Amount
+		} else if t.Operation == "Sortie" {
+			mvntOut += t.Amount
 		}
 	}
 
-	return &model.Caisse{
-		In:  mvntIn,
-		Out: mvntOut,
+	return &Caisse{
+		ID:      primitive.NewObjectID(),
+		In:      mvntIn,
+		Out:     mvntOut,
+		StoreID: storeObjectID,
+	}, nil
+}
+
+// FindCaisseByStoreIDs calculates cash register balances for multiple stores
+func (db *DB) FindCaisseByStoreIDs(storeIDs []primitive.ObjectID) (*Caisse, error) {
+	transactions, err := db.FindTransByStoreIDs(storeIDs)
+	if err != nil {
+		return nil, err
 	}
 
+	var mvntIn, mvntOut float64
+
+	for _, t := range transactions {
+		if t.Operation == "Entree" {
+			mvntIn += t.Amount
+		} else if t.Operation == "Sortie" {
+			mvntOut += t.Amount
+		}
+	}
+
+	return &Caisse{
+		ID:      primitive.NewObjectID(),
+		In:      mvntIn,
+		Out:     mvntOut,
+		StoreID: primitive.NilObjectID, // Multiple stores
+	}, nil
+}
+
+// DeleteTrans deletes a transaction
+func (db *DB) DeleteTrans(id string) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return gqlerror.Errorf("Invalid transaction ID")
+	}
+
+	transCollection := colHelper(db, "trans")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = transCollection.DeleteOne(ctx, bson.M{"_id": objectID})
+	if err != nil {
+		return gqlerror.Errorf("Error deleting transaction: %v", err)
+	}
+
+	return nil
 }

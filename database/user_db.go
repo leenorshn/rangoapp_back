@@ -88,7 +88,7 @@ func (db *DB) FindUserByID(id string) (*User, error) {
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, gqlerror.Errorf("User not found")
-		}
+	}
 		return nil, gqlerror.Errorf("Error finding user: %v", err)
 	}
 

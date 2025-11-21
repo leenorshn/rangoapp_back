@@ -4,6 +4,7 @@ import (
 	"context"
 	"rangoapp/database"
 	"rangoapp/middlewares"
+	"rangoapp/utils"
 )
 
 // This file will not be regenerated automatically.
@@ -22,7 +23,8 @@ func (r *Resolver) GetUserFromContext(ctx context.Context) (*database.User, erro
 
 	user, err := r.DB.FindUserByID(raw.ID)
 	if err != nil {
-		return nil, err
+		utils.LogError(err, "Failed to find user from context")
+		return nil, utils.NewDatabaseError("FindUserByID", err)
 	}
 
 	return user, nil

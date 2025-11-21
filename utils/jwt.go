@@ -23,7 +23,13 @@ var jwtSecret = []byte(getJwtSecret())
 func getJwtSecret() string {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
+		// In production, this should be required
+		// For development only, generate a warning
+		fmt.Println("WARNING: JWT_SECRET not set, using default. This is insecure for production!")
 		return "xzaako_secret_23_@_"
+	}
+	if len(secret) < 32 {
+		fmt.Println("WARNING: JWT_SECRET should be at least 32 characters long for security")
 	}
 	return secret
 }

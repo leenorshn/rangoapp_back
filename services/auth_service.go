@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 
 	"rangoapp/database"
 	"rangoapp/utils"
@@ -149,8 +148,4 @@ func (s *AuthService) Login(ctx context.Context, phone, password string) (*AuthR
 	}, nil
 }
 
-func (s *AuthService) GetUserFromContext(ctx context.Context) (*database.User, error) {
-	// This will be implemented in the resolver using middleware
-	return nil, fmt.Errorf("not implemented")
-}
 

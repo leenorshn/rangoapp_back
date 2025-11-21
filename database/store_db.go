@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"time"
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -21,7 +20,7 @@ type Store struct {
 
 func (db *DB) CreateStore(name, address, phone string, companyID primitive.ObjectID) (*Store, error) {
 	storeCollection := colHelper(db, "stores")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	store := Store{
@@ -49,7 +48,7 @@ func (db *DB) FindStoreByID(id string) (*Store, error) {
 	}
 
 	storeCollection := colHelper(db, "stores")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	var store Store
@@ -68,7 +67,7 @@ func (db *DB) FindStoresByCompanyID(companyID string) ([]*Store, error) {
 	}
 
 	storeCollection := colHelper(db, "stores")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	cursor, err := storeCollection.Find(ctx, bson.M{"companyId": objectID})
@@ -100,7 +99,7 @@ func (db *DB) FindStoresByIDs(storeIDs []string) ([]*Store, error) {
 	}
 
 	storeCollection := colHelper(db, "stores")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	cursor, err := storeCollection.Find(ctx, bson.M{"_id": bson.M{"$in": objectIDs}})
@@ -124,7 +123,7 @@ func (db *DB) UpdateStore(id string, name, address, phone *string) (*Store, erro
 	}
 
 	storeCollection := colHelper(db, "stores")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	update := bson.M{"updatedAt": time.Now()}
@@ -153,7 +152,7 @@ func (db *DB) DeleteStore(id string) error {
 	}
 
 	storeCollection := colHelper(db, "stores")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	// Check if store has any products, clients, factures, etc.

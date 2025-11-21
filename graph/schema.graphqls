@@ -270,7 +270,7 @@ input CreateRapportStoreInput {
 type Query {
   # Auth
   me: User! @auth
-  
+
   # Users
   users: [User!]! @auth
   user(id: ID!): User @auth
@@ -297,7 +297,7 @@ type Query {
   # Factures
   factures(storeId: String): [Facture!]! @auth # Si storeId non fourni, retourne les factures des stores accessibles
   facture(id: ID!): Facture @auth
-  
+
   # RapportStore
   rapportStore(storeId: String): [RapportStore!]! @auth # Si storeId non fourni, retourne les rapports des stores accessibles
   rapportStoreById(id: ID!): RapportStore @auth
@@ -321,22 +321,22 @@ type Mutation {
   
   # Company
   updateCompany(input: UpdateCompanyInput!): Company! @auth
-  
+
   # Stores
   createStore(input: CreateStoreInput!): Store! @auth
   updateStore(id: ID!, input: UpdateStoreInput!): Store! @auth
   deleteStore(id: ID!): Boolean! @auth
-  
+
   # Products
   createProduct(input: CreateProductInput!): Product! @auth
   updateProduct(id: ID!, input: UpdateProductInput!): Product! @auth
   deleteProduct(id: ID!): Boolean! @auth
-  
+
   # Clients
   createClient(input: CreateClientInput!): Client! @auth
   updateClient(id: ID!, input: UpdateClientInput!): Client! @auth
   deleteClient(id: ID!): Boolean! @auth
-  
+
   # Providers
   createProvider(input: CreateProviderInput!): Provider! @auth
   updateProvider(id: ID!, input: UpdateProviderInput!): Provider! @auth

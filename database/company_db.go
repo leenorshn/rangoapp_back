@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"time"
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -28,7 +27,7 @@ type Company struct {
 
 func (db *DB) CreateCompany(name, address, phone, description, companyType string, email, logo, rccm, idNat, idCommerce *string) (*Company, error) {
 	companyCollection := colHelper(db, "companies")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	// Check if company with same name already exists
@@ -71,7 +70,7 @@ func (db *DB) FindCompanyByID(id string) (*Company, error) {
 	}
 
 	companyCollection := colHelper(db, "companies")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	var company Company
@@ -93,7 +92,7 @@ func (db *DB) UpdateCompany(id string, name, address, phone, description, compan
 	}
 
 	companyCollection := colHelper(db, "companies")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	update := bson.M{"updatedAt": time.Now()}

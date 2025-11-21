@@ -26,12 +26,18 @@ Serveur backend GraphQL en Golang utilisant gqlgen et MongoDB Atlas pour une app
 go mod download
 ```
 
-3. Créer un fichier `.env` basé sur `.env.example`:
+3. Créer un fichier `.env` basé sur `env.example`:
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
-4. Configurer les variables d'environnement dans `.env`
+4. Configurer les variables d'environnement dans `.env`:
+   - **MONGO_URI** : URI de connexion MongoDB (REQUIS)
+   - **MONGO_DB_NAME** : Nom de la base de données (optionnel, défaut: rangodb)
+   - **JWT_SECRET** : Secret JWT pour signer les tokens (REQUIS en production, min 32 caractères)
+   - **PORT** : Port du serveur (optionnel, défaut: 8080)
+   
+   Voir `env.example` pour toutes les variables disponibles.
 
 5. Générer les modèles GraphQL:
 ```bash
