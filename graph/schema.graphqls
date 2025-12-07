@@ -11,7 +11,6 @@ type User {
   uid: String!
   name: String!
   phone: String!
-  email: String
   role: String! # Admin, User, etc.
   isBlocked: Boolean!
   companyId: String!
@@ -34,6 +33,7 @@ type Company {
   idNat: String
   idCommerce: String
   stores: [Store!]! # Liste des boutiques de l'entreprise
+  subscription: CompanySubscription! # Abonnement de l'entreprise
   createdAt: String!
   updatedAt: String!
 }
@@ -45,6 +45,8 @@ type Store {
   phone: String!
   companyId: String!
   company: Company!
+  defaultCurrency: String! # Currency par défaut de la boutique (ex: "USD", "CDF")
+  supportedCurrencies: [String!]! # Liste des currencies supportées par la boutique
   createdAt: String!
   updatedAt: String!
 }
@@ -55,9 +57,12 @@ type Product {
   mark: String!
   priceVente: Float!
   priceAchat: Float!
+  currency: String! # Currency du produit (USD, EUR, CDF)
   stock: Float!
   storeId: String!
   store: Store!
+  providerId: String # ID du fournisseur (optionnel)
+  provider: Provider # Fournisseur du produit (optionnel)
   createdAt: String!
   updatedAt: String!
 }
@@ -118,41 +123,229 @@ type RapportStore {
 }
 
 type AuthResponse {
-  token: String!
+  accessToken: String!
+  refreshToken: String!
   user: User!
+}
+
+type CompanySubscription {
+  id: ID!
+  companyId: String!
+  plan: String! # "trial", "starter", "business", "enterprise"
+  status: String! # "active", "expired", "cancelled", "suspended"
+  trialStartDate: String!
+  trialEndDate: String!
+  subscriptionStartDate: String
+  subscriptionEndDate: String
+  paymentMethod: String
+  paymentId: String
+  maxStores: Int!
+  maxUsers: Int!
+  daysRemaining: Int! # Jours restants dans l'essai ou l'abonnement
+  isTrialExpired: Boolean!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SubscriptionStatus {
+  isValid: Boolean!
+  message: String
+  subscription: CompanySubscription
+}
+
+type CaisseTransaction {
+  id: ID!
+  amount: Float!
+  operation: String! # "Entree" or "Sortie"
+  description: String!
+  currency: String! # "USD", "EUR" or "CDF"
+  storeId: String!
+  store: Store!
+  date: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Caisse {
+  currentBalance: Float!
+  in: Float!
+  out: Float!
+  totalBenefice: Float! # Total profit from sales in the period
+  currency: String! # "USD", "EUR" or "CDF"
+  storeId: String
+  store: Store
+}
+
+type CaisseRapport {
+  storeId: String
+  store: Store
+  currency: String! # "USD", "EUR" or "CDF"
+  period: String! # "jour", "semaine", "mois", "annee" ou "all"
+  startDate: String!
+  endDate: String!
+  totalEntrees: Float!
+  totalSorties: Float!
+  totalBenefice: Float! # Total profit from sales in the period
+  soldeInitial: Float! # Solde au début de la période
+  soldeFinal: Float! # Solde à la fin de la période (soldeInitial + totalEntrees - totalSorties)
+  nombreTransactions: Int!
+  transactions: [CaisseTransaction!]! # Liste détaillée des transactions
+  resumeParJour: [CaisseResumeJour!] # Résumé par jour (si période > jour)
+}
+
+type CaisseResumeJour {
+  date: String!
+  entrees: Float!
+  sorties: Float!
+  benefice: Float! # Profit from sales for this day
+  solde: Float!
+  nombreTransactions: Int!
+}
+
+type Sale {
+  id: ID!
+  basket: [SaleProduct!]!
+  priceToPay: Float!
+  pricePayed: Float!
+  change: Float! # Calculated: pricePayed - priceToPay
+  benefice: Float! # Calculated: sum of (price - priceAchat) * quantity for each product
+  currency: String! # "USD", "EUR" or "CDF"
+  client: Client # Optional: client may not be specified for walk-in sales
+  operator: User! # User who made the sale
+  storeId: String!
+  store: Store!
+  paymentType: String! # "cash", "debt", "advance"
+  amountDue: Float! # Montant dû (dette restante)
+  debtStatus: String! # "paid", "partial", "unpaid", "none"
+  debtId: String # ID de la dette si applicable
+  debt: Debt # Dette associée si applicable
+  date: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SaleList {
+  id: ID!
+  date: String!
+  createdAt: String!
+  priceToPay: Float!
+  pricePayed: Float!
+  change: Float! # Calculated: pricePayed - priceToPay
+  currency: String!
+  client: Client # Optional: client may not be specified for walk-in sales
+  basketCount: Int! # Number of different products in basket
+  totalItems: Float! # Total quantity of all items
+  storeId: String!
+  paymentType: String! # "cash", "debt", "advance"
+  amountDue: Float! # Montant dû (dette restante)
+  debtStatus: String! # "paid", "partial", "unpaid", "none"
+}
+
+type Debt {
+  id: ID!
+  saleId: String!
+  sale: Sale! # Vente associée
+  clientId: String!
+  client: Client! # Client qui doit
+  storeId: String!
+  store: Store!
+  totalAmount: Float! # Montant total de la vente
+  amountPaid: Float! # Montant déjà payé
+  amountDue: Float! # Montant restant à payer
+  currency: String! # "USD", "EUR" or "CDF"
+  status: String! # "paid", "partial", "unpaid"
+  paymentType: String! # "cash", "debt", "advance"
+  payments: [DebtPayment!]! # Historique des paiements
+  createdAt: String!
+  updatedAt: String!
+  paidAt: String # Date de paiement complet (si status = "paid")
+}
+
+type DebtPayment {
+  id: ID!
+  debtId: String!
+  debt: Debt! # Dette associée
+  amount: Float!
+  currency: String! # "USD", "EUR" or "CDF"
+  operatorId: String!
+  operator: User! # Utilisateur qui a enregistré le paiement
+  storeId: String!
+  store: Store!
+  description: String!
+  createdAt: String!
+}
+
+type SalesStats {
+  totalSales: Int! # Total number of sales
+  totalRevenue: Float! # Total revenue (sum of pricePayed)
+  totalItems: Float! # Total quantity of items sold
+  averageSale: Float! # Average sale amount
+  totalBenefice: Float! # Total profit (calculated separately)
+}
+
+type SaleProduct {
+  productId: String!
+  product: Product!
+  quantity: Float!
+  price: Float!
+}
+
+type Inventory {
+  id: ID!
+  storeId: String!
+  store: Store!
+  operatorId: String!
+  operator: User! # Utilisateur qui a créé l'inventaire
+  status: String! # "draft", "in_progress", "completed", "cancelled"
+  startDate: String! # Date de début de l'inventaire
+  endDate: String # Date de fin de l'inventaire (si status = "completed")
+  description: String! # Description de l'inventaire
+  items: [InventoryItem!]! # Liste des produits inventoriés
+  totalItems: Int! # Nombre total de produits inventoriés
+  totalValue: Float! # Valeur totale de l'inventaire (en prix de vente)
+  createdAt: String!
+  updatedAt: String!
+}
+
+type InventoryItem {
+  productId: String!
+  product: Product! # Produit associé
+  productName: String! # Nom du produit au moment de l'inventaire (snapshot)
+  systemQuantity: Float! # Quantité dans le système
+  physicalQuantity: Float! # Quantité physique comptée
+  difference: Float! # Différence (physicalQuantity - systemQuantity)
+  unitPrice: Float! # Prix unitaire au moment de l'inventaire (prix de vente)
+  totalValue: Float! # Valeur totale (physicalQuantity * unitPrice)
+  reason: String # Raison de l'écart (vol, casse, erreur, etc.)
+  countedBy: String! # ID de la personne qui a compté
+  countedByUser: User! # Utilisateur qui a compté
+  countedAt: String! # Date et heure du comptage
 }
 
 # ============ INPUTS ============
 
 input RegisterInput {
-  # Informations utilisateur Admin
-  email: String!
-  password: String!
   name: String!
   phone: String!
-  
-  # Informations Company
-  companyName: String!
-  companyAddress: String!
-  companyPhone: String!
-  companyDescription: String!
-  companyType: String!
-  companyEmail: String
-  companyLogo: String
-  companyRccm: String
-  companyIdNat: String
-  companyIdCommerce: String
-  
-  # Informations du premier Store (boutique)
-  storeName: String!
-  storeAddress: String!
-  storePhone: String!
+  password: String!
+}
+
+input CreateCompanyInput {
+  name: String!
+  address: String!
+  phone: String!
+  email: String
+  description: String!
+  type: String!
+  logo: String
+  rccm: String
+  idNat: String
+  idCommerce: String
 }
 
 input CreateUserInput {
   name: String!
   phone: String!
-  email: String
   password: String!
   role: String! # "Admin" ou "User"
   storeId: String # Optionnel: si role="User", assigner directement à un store
@@ -161,9 +354,13 @@ input CreateUserInput {
 input UpdateUserInput {
   name: String
   phone: String
-  email: String
   role: String
   storeId: String # Pour changer l'assignation de store (si role="User")
+}
+
+input ChangePasswordInput {
+  currentPassword: String!
+  newPassword: String!
 }
 
 input UpdateCompanyInput {
@@ -183,12 +380,16 @@ input CreateStoreInput {
   name: String!
   address: String!
   phone: String!
+  defaultCurrency: String # Currency par défaut (optionnel, défaut: "USD")
+  supportedCurrencies: [String!] # Liste des currencies supportées (optionnel, si non fourni, utilise defaultCurrency)
 }
 
 input UpdateStoreInput {
   name: String
   address: String
   phone: String
+  defaultCurrency: String # Currency par défaut
+  supportedCurrencies: [String!] # Liste des currencies supportées (doit inclure defaultCurrency)
 }
 
 input CreateProductInput {
@@ -197,7 +398,9 @@ input CreateProductInput {
   priceVente: Float!
   priceAchat: Float!
   stock: Float!
+  currency: String # Optional: si non fourni, utilise la currency par défaut de la boutique
   storeId: String! # Store auquel appartient le produit
+  providerId: String # ID du fournisseur (optionnel)
 }
 
 input UpdateProductInput {
@@ -206,6 +409,8 @@ input UpdateProductInput {
   priceVente: Float
   priceAchat: Float
   stock: Float
+  currency: String # Currency du produit
+  providerId: String # ID du fournisseur (optionnel, peut être null pour retirer le fournisseur)
 }
 
 input CreateClientInput {
@@ -244,7 +449,7 @@ input CreateFactureInput {
   storeId: String! # Store pour lequel la facture est créée
   quantity: Int!
   price: Float!
-  currency: String!
+  currency: String # Optional: si non fourni, utilise la currency par défaut de la boutique
   date: String!
 }
 
@@ -265,6 +470,44 @@ input CreateRapportStoreInput {
   date: String!
 }
 
+input CreateCaisseTransactionInput {
+  amount: Float!
+  operation: String! # "Entree" or "Sortie"
+  description: String!
+  currency: String # Optional: si non fourni, utilise la currency par défaut de la boutique
+  storeId: String!
+  date: String
+}
+
+input SaleProductInput {
+  productId: String!
+  quantity: Float!
+  price: Float!
+}
+
+input CreateSaleInput {
+  basket: [SaleProductInput!]!
+  priceToPay: Float!
+  pricePayed: Float!
+  clientId: String # Optional: client may not be specified for walk-in sales
+  storeId: String!
+  currency: String # Optional: si non fourni, utilise la currency par défaut de la boutique
+  paymentType: String # Optional: "cash", "debt", "advance" (défaut: "cash")
+  date: String # Optional, defaults to now
+}
+
+input CreateInventoryInput {
+  storeId: String!
+  description: String! # Description de l'inventaire
+}
+
+input AddInventoryItemInput {
+  inventoryId: String!
+  productId: String!
+  physicalQuantity: Float! # Quantité physique comptée
+  reason: String # Raison de l'écart (vol, casse, erreur, etc.)
+}
+
 # ============ QUERIES ============
 
 type Query {
@@ -277,6 +520,10 @@ type Query {
   
   # Company
   company: Company! @auth
+  
+  # Subscription
+  subscription: CompanySubscription! @auth
+  checkSubscriptionStatus: SubscriptionStatus! @auth
   
   # Stores
   stores: [Store!]! @auth
@@ -301,6 +548,57 @@ type Query {
   # RapportStore
   rapportStore(storeId: String): [RapportStore!]! @auth # Si storeId non fourni, retourne les rapports des stores accessibles
   rapportStoreById(id: ID!): RapportStore @auth
+
+  # Caisse
+  caisse(storeId: String, currency: String, period: String): Caisse! @auth # period: "jour", "semaine", "mois", "annee" ou null pour tout
+  caisseTransactions(storeId: String, currency: String, period: String, limit: Int): [CaisseTransaction!]! @auth
+  caisseTransaction(id: ID!): CaisseTransaction @auth
+  caisseRapport(storeId: String, currency: String, period: String, startDate: String, endDate: String): CaisseRapport! @auth # Rapport détaillé de la caisse avec entrées et sorties
+
+  # Sales
+  sales(
+    storeId: String
+    limit: Int
+    offset: Int
+    period: String
+    startDate: String
+    endDate: String
+    currency: String
+  ): [Sale!]! @auth # Si storeId non fourni, retourne les ventes des stores accessibles
+  salesList(
+    storeId: String
+    limit: Int
+    offset: Int
+    period: String
+    startDate: String
+    endDate: String
+    currency: String
+  ): [SaleList!]! @auth # Version optimisée pour la liste (sans détails complets)
+  salesCount(
+    storeId: String
+    period: String
+    startDate: String
+    endDate: String
+    currency: String
+  ): Int! @auth # Nombre total de ventes pour la pagination
+  salesStats(
+    storeId: String
+    period: String
+    startDate: String
+    endDate: String
+    currency: String
+  ): SalesStats! @auth # Statistiques agrégées des ventes (utilise aggregation pipeline)
+  sale(id: ID!): Sale @auth
+  
+  # Debts
+  debts(storeId: String, status: String): [Debt!]! @auth # Liste des dettes (optionnel: filtrer par store et status)
+  debt(id: ID!): Debt @auth # Détails d'une dette
+  clientDebts(clientId: String!, storeId: String): [Debt!]! @auth # Dettes d'un client spécifique
+  
+  # Inventories
+  inventories(storeId: String, status: String): [Inventory!]! @auth # Liste des inventaires (optionnel: filtrer par store et status)
+  inventory(id: ID!): Inventory @auth # Détails d'un inventaire
+  activeInventory(storeId: String!): Inventory @auth # Inventaire actif pour un store (draft ou in_progress)
 }
 
 # ============ MUTATIONS ============
@@ -318,9 +616,12 @@ type Mutation {
   blockUser(id: ID!): User! @auth
   unblockUser(id: ID!): User! @auth
   assignUserToStore(userId: ID!, storeId: ID!): User! @auth # Assigner un utilisateur User à un store
+  changePassword(input: ChangePasswordInput!): Boolean! @auth # Changer le mot de passe de l'utilisateur connecté
   
   # Company
+  createCompany(input: CreateCompanyInput!): Company! @auth
   updateCompany(input: UpdateCompanyInput!): Company! @auth
+  deleteCompany: Boolean! @auth
 
   # Stores
   createStore(input: CreateStoreInput!): Store! @auth
@@ -350,4 +651,27 @@ type Mutation {
   # RapportStore
   createRapportStore(input: CreateRapportStoreInput!): RapportStore! @auth
   deleteRapportStore(id: ID!): Boolean! @auth
+
+  # Caisse
+  createCaisseTransaction(input: CreateCaisseTransactionInput!): CaisseTransaction! @auth
+  deleteCaisseTransaction(id: ID!): Boolean! @auth
+
+  # Sales
+  createSale(input: CreateSaleInput!): Sale! @auth
+  deleteSale(id: ID!): Boolean! @auth
+  createFactureFromSale(saleId: ID!): Facture! @auth # Generate a facture from a sale for printing
+  
+  # Debts
+  payDebt(debtId: ID!, amount: Float!, description: String!): Debt! @auth # Payer une dette (partiellement ou totalement)
+  
+  # Inventories
+  createInventory(input: CreateInventoryInput!): Inventory! @auth # Créer une nouvelle session d'inventaire
+  addInventoryItem(input: AddInventoryItemInput!): Inventory! @auth # Ajouter ou mettre à jour un produit dans l'inventaire
+  completeInventory(inventoryId: ID!, adjustStock: Boolean!): Inventory! @auth # Compléter l'inventaire (optionnel: ajuster le stock automatiquement)
+  cancelInventory(inventoryId: ID!): Inventory! @auth # Annuler un inventaire
+  
+  # Subscription
+  createSubscription(plan: String!, paymentMethod: String!, paymentId: String!): CompanySubscription! @auth
+  upgradeSubscription(plan: String!, paymentMethod: String!, paymentId: String!): CompanySubscription! @auth
+  cancelSubscription: Boolean! @auth
 }

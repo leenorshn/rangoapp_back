@@ -8,10 +8,7 @@ import (
 
 // ValidateRegisterInput validates RegisterInput
 func ValidateRegisterInput(input *model.RegisterInput) error {
-	// User fields
-	if err := ValidateEmail(input.Email); err != nil {
-		return err
-	}
+	// User fields only
 	if err := ValidatePassword(input.Password); err != nil {
 		return err
 	}
@@ -19,39 +16,6 @@ func ValidateRegisterInput(input *model.RegisterInput) error {
 		return err
 	}
 	if err := ValidatePhone(input.Phone); err != nil {
-		return err
-	}
-
-	// Company fields
-	if err := ValidateString(input.CompanyName, "Company name", true, 2, 200); err != nil {
-		return err
-	}
-	if err := ValidateString(input.CompanyAddress, "Company address", true, 5, 500); err != nil {
-		return err
-	}
-	if err := ValidatePhone(input.CompanyPhone); err != nil {
-		return err
-	}
-	if err := ValidateString(input.CompanyDescription, "Company description", true, 10, 1000); err != nil {
-		return err
-	}
-	if err := ValidateString(input.CompanyType, "Company type", true, 2, 50); err != nil {
-		return err
-	}
-	if input.CompanyEmail != nil {
-		if err := ValidateEmail(*input.CompanyEmail); err != nil {
-			return err
-		}
-	}
-
-	// Store fields
-	if err := ValidateString(input.StoreName, "Store name", true, 2, 200); err != nil {
-		return err
-	}
-	if err := ValidateString(input.StoreAddress, "Store address", true, 5, 500); err != nil {
-		return err
-	}
-	if err := ValidatePhone(input.StorePhone); err != nil {
 		return err
 	}
 
@@ -65,11 +29,6 @@ func ValidateCreateUserInput(input *model.CreateUserInput) error {
 	}
 	if err := ValidatePhone(input.Phone); err != nil {
 		return err
-	}
-	if input.Email != nil {
-		if err := ValidateEmail(*input.Email); err != nil {
-			return err
-		}
 	}
 	if err := ValidatePassword(input.Password); err != nil {
 		return err
@@ -97,11 +56,6 @@ func ValidateUpdateUserInput(input *model.UpdateUserInput) error {
 			return err
 		}
 	}
-	if input.Email != nil {
-		if err := ValidateEmail(*input.Email); err != nil {
-			return err
-		}
-	}
 	if input.Role != nil {
 		if err := ValidateRole(*input.Role); err != nil {
 			return err
@@ -109,6 +63,31 @@ func ValidateUpdateUserInput(input *model.UpdateUserInput) error {
 	}
 	if input.StoreID != nil {
 		if err := ValidateObjectID(*input.StoreID, "Store ID"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateCreateCompanyInput validates CreateCompanyInput
+func ValidateCreateCompanyInput(input *model.CreateCompanyInput) error {
+	if err := ValidateString(input.Name, "Company name", true, 2, 200); err != nil {
+		return err
+	}
+	if err := ValidateString(input.Address, "Company address", true, 5, 500); err != nil {
+		return err
+	}
+	if err := ValidatePhone(input.Phone); err != nil {
+		return err
+	}
+	if err := ValidateString(input.Description, "Company description", true, 10, 1000); err != nil {
+		return err
+	}
+	if err := ValidateString(input.Type, "Company type", true, 2, 50); err != nil {
+		return err
+	}
+	if input.Email != nil {
+		if err := ValidateEmail(*input.Email); err != nil {
 			return err
 		}
 	}
@@ -204,8 +183,20 @@ func ValidateCreateProductInput(input *model.CreateProductInput) error {
 	if err := ValidateFloat(input.Stock, "Stock", true, 0, 0); err != nil {
 		return err
 	}
+	// Currency is optional - if provided, validate it
+	if input.Currency != nil && *input.Currency != "" {
+		if err := ValidateCurrency(*input.Currency); err != nil {
+			return err
+		}
+	}
 	if err := ValidateObjectID(input.StoreID, "Store ID"); err != nil {
 		return err
+	}
+	// ProviderID is optional - if provided, validate it
+	if input.ProviderID != nil && *input.ProviderID != "" {
+		if err := ValidateObjectID(*input.ProviderID, "Provider ID"); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -248,6 +239,18 @@ func ValidateUpdateProductInput(input *model.UpdateProductInput) error {
 	}
 	if input.Stock != nil {
 		if err := ValidateFloat(*input.Stock, "Stock", false, 0, 0); err != nil {
+			return err
+		}
+	}
+	// Currency is optional - if provided, validate it
+	if input.Currency != nil && *input.Currency != "" {
+		if err := ValidateCurrency(*input.Currency); err != nil {
+			return err
+		}
+	}
+	// ProviderID is optional - if provided, validate it
+	if input.ProviderID != nil && *input.ProviderID != "" {
+		if err := ValidateObjectID(*input.ProviderID, "Provider ID"); err != nil {
 			return err
 		}
 	}
@@ -359,8 +362,11 @@ func ValidateCreateFactureInput(input *model.CreateFactureInput) error {
 	if err := ValidateFloat(input.Price, "Price", true, 0, 0); err != nil {
 		return err
 	}
-	if err := ValidateCurrency(input.Currency); err != nil {
-		return err
+	// Currency is optional - if provided, validate it
+	if input.Currency != nil && *input.Currency != "" {
+		if err := ValidateCurrency(*input.Currency); err != nil {
+			return err
+		}
 	}
 	if err := ValidateDate(input.Date, "Date"); err != nil {
 		return err
@@ -442,4 +448,139 @@ func ValidateLoginInput(phone, password string) error {
 	return nil
 }
 
+// ValidateCreateCaisseTransactionInput validates CreateCaisseTransactionInput
+func ValidateCreateCaisseTransactionInput(input *model.CreateCaisseTransactionInput) error {
+	if err := ValidateFloat(input.Amount, "Amount", true, 0.01, 1000000000); err != nil {
+		return err
+	}
+	if input.Operation != "Entree" && input.Operation != "Sortie" {
+		return gqlerror.Errorf("Operation must be 'Entree' or 'Sortie'")
+	}
+	if err := ValidateString(input.Description, "Description", true, 3, 500); err != nil {
+		return err
+	}
+	// Currency is optional - if provided, validate it
+	if input.Currency != nil && *input.Currency != "" {
+		if err := ValidateCurrency(*input.Currency); err != nil {
+			return err
+		}
+		// Validate against supported currencies: USD, EUR, CDF
+		if *input.Currency != "USD" && *input.Currency != "EUR" && *input.Currency != "CDF" {
+			return gqlerror.Errorf("Currency must be 'USD', 'EUR' or 'CDF'")
+		}
+	}
+	if err := ValidateObjectID(input.StoreID, "Store ID"); err != nil {
+		return err
+	}
+	// Date is optional, but if provided, validate format
+	if input.Date != nil {
+		if err := ValidateDate(*input.Date, "Date"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// ValidateSaleProductInput validates SaleProductInput
+func ValidateSaleProductInput(input *model.SaleProductInput) error {
+	if err := ValidateObjectID(input.ProductID, "Product ID"); err != nil {
+		return err
+	}
+	if err := ValidateFloat(input.Quantity, "Quantity", true, 0.01, 0); err != nil {
+		return err
+	}
+	if err := ValidateFloat(input.Price, "Price", true, 0, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateCreateSaleInput validates CreateSaleInput
+func ValidateCreateSaleInput(input *model.CreateSaleInput) error {
+	if input.Basket == nil || len(input.Basket) == 0 {
+		return gqlerror.Errorf("Basket cannot be empty")
+	}
+	if len(input.Basket) > 100 {
+		return gqlerror.Errorf("Maximum 100 products allowed per sale")
+	}
+	for i, product := range input.Basket {
+		if err := ValidateSaleProductInput(product); err != nil {
+			return gqlerror.Errorf("Product %d: %v", i+1, err)
+		}
+	}
+	if err := ValidateFloat(input.PriceToPay, "Price to pay", true, 0.01, 0); err != nil {
+		return err
+	}
+	if err := ValidateFloat(input.PricePayed, "Price payed", true, 0.01, 0); err != nil {
+		return err
+	}
+	// Note: PricePayed can be less than PriceToPay to allow discounts/reductions
+	// The seller has full control over pricing and discounts
+	// Currency is optional - if provided, validate it
+	if input.Currency != nil && *input.Currency != "" {
+		if err := ValidateCurrency(*input.Currency); err != nil {
+			return err
+		}
+	}
+	// Client ID is optional (for walk-in sales)
+	if input.ClientID != nil {
+		if err := ValidateObjectID(*input.ClientID, "Client ID"); err != nil {
+			return err
+		}
+	}
+	if err := ValidateObjectID(input.StoreID, "Store ID"); err != nil {
+		return err
+	}
+	if input.Date != nil {
+		if err := ValidateDate(*input.Date, "Date"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateCreateInventoryInput validates CreateInventoryInput
+func ValidateCreateInventoryInput(input *model.CreateInventoryInput) error {
+	if err := ValidateObjectID(input.StoreID, "Store ID"); err != nil {
+		return err
+	}
+	if err := ValidateString(input.Description, "Description", true, 3, 500); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateAddInventoryItemInput validates AddInventoryItemInput
+func ValidateAddInventoryItemInput(input *model.AddInventoryItemInput) error {
+	if err := ValidateObjectID(input.InventoryID, "Inventory ID"); err != nil {
+		return err
+	}
+	if err := ValidateObjectID(input.ProductID, "Product ID"); err != nil {
+		return err
+	}
+	if err := ValidateFloat(input.PhysicalQuantity, "Physical quantity", true, 0, 0); err != nil {
+		return err
+	}
+	// Reason is optional, but if provided, validate length
+	if input.Reason != nil && *input.Reason != "" {
+		if err := ValidateString(*input.Reason, "Reason", false, 1, 200); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateChangePasswordInput validates ChangePasswordInput
+func ValidateChangePasswordInput(input *model.ChangePasswordInput) error {
+	if input.CurrentPassword == "" {
+		return gqlerror.Errorf("Current password is required")
+	}
+	if err := ValidatePassword(input.NewPassword); err != nil {
+		return err
+	}
+	// Ensure new password is different from current password
+	if input.CurrentPassword == input.NewPassword {
+		return gqlerror.Errorf("New password must be different from current password")
+	}
+	return nil
+}

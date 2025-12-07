@@ -88,7 +88,7 @@ func (db *DB) FindUserByID(id string) (*User, error) {
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, gqlerror.Errorf("User not found")
-	}
+		}
 		return nil, gqlerror.Errorf("Error finding user: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func (db *DB) UpdateUserStoreIDs(userID string, storeIDs []primitive.ObjectID) e
 	}
 
 	userCollection := colHelper(db, "users")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := GetDBContext()
 	defer cancel()
 
 	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": bson.M{
@@ -228,6 +228,28 @@ func (db *DB) UpdateUserStoreIDs(userID string, storeIDs []primitive.ObjectID) e
 	}})
 	if err != nil {
 		return gqlerror.Errorf("Error updating user store IDs: %v", err)
+	}
+
+	return nil
+}
+
+// UpdateUserCompanyID updates the company ID for a user
+func (db *DB) UpdateUserCompanyID(userID string, companyID primitive.ObjectID) error {
+	objectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return gqlerror.Errorf("Invalid user ID")
+	}
+
+	userCollection := colHelper(db, "users")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": bson.M{
+		"companyId": companyID,
+		"updatedAt": time.Now(),
+	}})
+	if err != nil {
+		return gqlerror.Errorf("Error updating user company ID: %v", err)
 	}
 
 	return nil
@@ -315,4 +337,38 @@ func (db *DB) AuthenticateUser(phone, password string) (*User, error) {
 	}
 
 	return user, nil
+}
+
+// ChangePassword changes the password for a user
+func (db *DB) ChangePassword(userID string, currentPassword, newPassword string) error {
+	user, err := db.FindUserByID(userID)
+	if err != nil {
+		return err
+	}
+
+	// Verify current password
+	if !utils.ComparePassword(currentPassword, user.Password) {
+		return gqlerror.Errorf("Current password is incorrect")
+	}
+
+	// Hash new password
+	hashedPassword, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return gqlerror.Errorf("Error hashing password: %v", err)
+	}
+
+	// Update password
+	userCollection := colHelper(db, "users")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = userCollection.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{"$set": bson.M{
+		"password":  hashedPassword,
+		"updatedAt": time.Now(),
+	}})
+	if err != nil {
+		return gqlerror.Errorf("Error updating password: %v", err)
+	}
+
+	return nil
 }

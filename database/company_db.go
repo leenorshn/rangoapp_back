@@ -134,3 +134,56 @@ func (db *DB) UpdateCompany(id string, name, address, phone, description, compan
 
 	return db.FindCompanyByID(id)
 }
+
+func (db *DB) DeleteCompany(id string) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return gqlerror.Errorf("Invalid company ID")
+	}
+
+	companyCollection := colHelper(db, "companies")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	// Check if company has any stores
+	storeCollection := colHelper(db, "stores")
+	storeCount, _ := storeCollection.CountDocuments(ctx, bson.M{"companyId": objectID})
+	if storeCount > 0 {
+		return gqlerror.Errorf("Cannot delete company: it contains stores. Please delete all stores first.")
+	}
+
+	// Check if company has any users
+	userCollection := colHelper(db, "users")
+	userCount, _ := userCollection.CountDocuments(ctx, bson.M{"companyId": objectID})
+	if userCount > 1 {
+		// More than 1 because we need to check if there are other users besides the one deleting
+		return gqlerror.Errorf("Cannot delete company: it contains users. Please remove all users first.")
+	}
+
+	_, err = companyCollection.DeleteOne(ctx, bson.M{"_id": objectID})
+	if err != nil {
+		return gqlerror.Errorf("Error deleting company: %v", err)
+	}
+
+	return nil
+}
+
+// FindAllCompanies retrieves all companies from the database
+func (db *DB) FindAllCompanies() ([]*Company, error) {
+	companyCollection := colHelper(db, "companies")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	cursor, err := companyCollection.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, gqlerror.Errorf("Error finding companies: %v", err)
+	}
+	defer cursor.Close(ctx)
+
+	var companies []*Company
+	if err = cursor.All(ctx, &companies); err != nil {
+		return nil, gqlerror.Errorf("Error decoding companies: %v", err)
+	}
+
+	return companies, nil
+}

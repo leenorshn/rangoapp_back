@@ -1,0 +1,40 @@
+# Configuration des variables d'environnement pour Cloud Run
+# Utilisez ce fichier avec: gcloud run services update rangoapp-backend --update-env-vars-file cloudrun-env.yaml
+
+# ============ OBLIGATOIRES ============
+MONGO_URI: "mongodb+srv://user:password@cluster.mongodb.net/rangodb?retryWrites=true&w=majority"
+MONGO_DB_NAME: "rangodb"
+JWT_SECRET: "your-very-long-and-secure-secret-key-at-least-32-characters-long"
+
+# ============ SERVEUR ============
+PORT: "8080"
+
+# ============ BASE DE DONNÉES (Optionnel) ============
+DB_TIMEOUT_SECONDS: "5"
+DB_CONNECT_TIMEOUT_SECONDS: "10"
+DB_MAX_RETRIES: "3"
+
+# ============ HEALTH CHECK (Optionnel) ============
+HEALTH_CHECK_INTERVAL_SECONDS: "30"
+
+# ============ LOGGING (Optionnel) ============
+LOG_LEVEL: "INFO"
+
+# ============ CORS (Important pour le frontend) ============
+ALLOWED_ORIGINS: "https://rangoweb-ioelziq27-leenorshns-projects.vercel.app"
+
+# ============ DEBUG CORS (Optionnel, pour déboguer) ============
+# CORS_DEBUG: "true"
+
+
+
+
+
+
+
+
+
+
+
+
+

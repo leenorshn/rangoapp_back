@@ -10,18 +10,20 @@ import (
 )
 
 type Product struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name      string             `bson:"name" json:"name"`
-	Mark      string             `bson:"mark" json:"mark"`
-	PriceVente float64           `bson:"priceVente" json:"priceVente"`
-	PriceAchat float64           `bson:"priceAchat" json:"priceAchat"`
-	Stock      float64           `bson:"stock" json:"stock"`
-	StoreID    primitive.ObjectID `bson:"storeId" json:"storeId"`
-	CreatedAt  time.Time          `bson:"createdAt" json:"createdAt"`
-	UpdatedAt  time.Time          `bson:"updatedAt" json:"updatedAt"`
+	ID         primitive.ObjectID  `bson:"_id,omitempty" json:"id"`
+	Name       string              `bson:"name" json:"name"`
+	Mark       string              `bson:"mark" json:"mark"`
+	PriceVente float64             `bson:"priceVente" json:"priceVente"`
+	PriceAchat float64             `bson:"priceAchat" json:"priceAchat"`
+	Currency   string              `bson:"currency" json:"currency"` // Currency du produit (USD, EUR, CDF)
+	Stock      float64             `bson:"stock" json:"stock"`
+	StoreID    primitive.ObjectID  `bson:"storeId" json:"storeId"`
+	ProviderID *primitive.ObjectID `bson:"providerId,omitempty" json:"providerId,omitempty"` // Fournisseur optionnel
+	CreatedAt  time.Time           `bson:"createdAt" json:"createdAt"`
+	UpdatedAt  time.Time           `bson:"updatedAt" json:"updatedAt"`
 }
 
-func (db *DB) CreateProduct(name, mark string, priceVente, priceAchat, stock float64, storeID primitive.ObjectID) (*Product, error) {
+func (db *DB) CreateProduct(name, mark string, priceVente, priceAchat, stock float64, currency string, storeID primitive.ObjectID, providerID *primitive.ObjectID) (*Product, error) {
 	productCollection := colHelper(db, "products")
 	ctx, cancel := GetDBContext()
 	defer cancel()
@@ -31,16 +33,57 @@ func (db *DB) CreateProduct(name, mark string, priceVente, priceAchat, stock flo
 		return nil, gqlerror.Errorf("Price de vente must be >= price d'achat")
 	}
 
+	// Validate currency
+	if currency == "" {
+		// Get default currency from store
+		store, err := db.FindStoreByID(storeID.Hex())
+		if err != nil {
+			return nil, gqlerror.Errorf("Store not found")
+		}
+		currency = store.DefaultCurrency
+		if currency == "" {
+			currency = "USD" // Fallback to USD
+		}
+	} else {
+		// Validate currency is supported by store
+		isValid, err := db.ValidateStoreCurrency(storeID.Hex(), currency)
+		if err != nil {
+			return nil, err
+		}
+		if !isValid {
+			store, _ := db.FindStoreByID(storeID.Hex())
+			supportedCurrencies := []string{}
+			if store != nil {
+				supportedCurrencies = store.SupportedCurrencies
+			}
+			return nil, gqlerror.Errorf("Currency %s is not supported by this store. Supported currencies: %v", currency, supportedCurrencies)
+		}
+	}
+
+	// Validate provider if provided
+	if providerID != nil && !providerID.IsZero() {
+		provider, err := db.FindProviderByID(providerID.Hex())
+		if err != nil {
+			return nil, gqlerror.Errorf("Provider not found")
+		}
+		// Verify provider belongs to the same store
+		if provider.StoreID != storeID {
+			return nil, gqlerror.Errorf("Provider does not belong to the same store as the product")
+		}
+	}
+
 	product := Product{
-		ID:        primitive.NewObjectID(),
-		Name:      name,
-		Mark:      mark,
+		ID:         primitive.NewObjectID(),
+		Name:       name,
+		Mark:       mark,
 		PriceVente: priceVente,
 		PriceAchat: priceAchat,
-		Stock:     stock,
-		StoreID:   storeID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Currency:   currency,
+		Stock:      stock,
+		StoreID:    storeID,
+		ProviderID: providerID,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	_, err := productCollection.InsertOne(ctx, product)
@@ -89,7 +132,7 @@ func (db *DB) FindProductsByStoreIDs(storeIDs []primitive.ObjectID) ([]*Product,
 	return products, nil
 }
 
-func (db *DB) UpdateProduct(id string, name, mark *string, priceVente, priceAchat, stock *float64) (*Product, error) {
+func (db *DB) UpdateProduct(id string, name, mark *string, priceVente, priceAchat, stock *float64, currency *string, providerID *primitive.ObjectID) (*Product, error) {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, gqlerror.Errorf("Invalid product ID")
@@ -99,7 +142,7 @@ func (db *DB) UpdateProduct(id string, name, mark *string, priceVente, priceAcha
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Get current product to validate prices
+	// Get current product to validate prices and get storeID
 	var currentProduct Product
 	err = productCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&currentProduct)
 	if err != nil {
@@ -121,6 +164,42 @@ func (db *DB) UpdateProduct(id string, name, mark *string, priceVente, priceAcha
 	}
 	if stock != nil {
 		update["stock"] = *stock
+	}
+
+	// Handle currency update
+	if currency != nil && *currency != "" {
+		// Validate currency is supported by store
+		isValid, err := db.ValidateStoreCurrency(currentProduct.StoreID.Hex(), *currency)
+		if err != nil {
+			return nil, err
+		}
+		if !isValid {
+			store, _ := db.FindStoreByID(currentProduct.StoreID.Hex())
+			supportedCurrencies := []string{}
+			if store != nil {
+				supportedCurrencies = store.SupportedCurrencies
+			}
+			return nil, gqlerror.Errorf("Currency %s is not supported by this store. Supported currencies: %v", *currency, supportedCurrencies)
+		}
+		update["currency"] = *currency
+	}
+
+	// Validate provider if provided
+	if providerID != nil {
+		if !providerID.IsZero() {
+			provider, err := db.FindProviderByID(providerID.Hex())
+			if err != nil {
+				return nil, gqlerror.Errorf("Provider not found")
+			}
+			// Verify provider belongs to the same store
+			if provider.StoreID != currentProduct.StoreID {
+				return nil, gqlerror.Errorf("Provider does not belong to the same store as the product")
+			}
+			update["providerId"] = *providerID
+		} else {
+			// If providerID is explicitly set to nil/empty, remove it
+			update["providerId"] = nil
+		}
 	}
 
 	// Validate prices if both are being updated

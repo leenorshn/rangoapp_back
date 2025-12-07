@@ -140,6 +140,7 @@ func ValidateRapportType(rapportType string) error {
 }
 
 // ValidateCurrency validates a currency code
+// Only USD, EUR, and CDF are supported
 func ValidateCurrency(currency string) error {
 	if currency == "" {
 		return gqlerror.Errorf("Currency is required")
@@ -147,26 +148,25 @@ func ValidateCurrency(currency string) error {
 	validCurrencies := map[string]bool{
 		"USD": true,
 		"EUR": true,
-		"XAF": true,
-		"XOF": true,
 		"CDF": true,
 	}
 	currency = strings.ToUpper(currency)
 	if !validCurrencies[currency] {
-		return gqlerror.Errorf("Invalid currency code. Supported: USD, EUR, XAF, XOF, CDF")
+		return gqlerror.Errorf("Invalid currency code. Supported: USD, EUR, CDF")
 	}
 	return nil
 }
 
-// ValidateDate validates a date string (RFC3339 format)
+// ValidateDate validates a date string (RFC3339 format or YYYY-MM-DD format)
 func ValidateDate(dateStr, fieldName string) error {
 	if dateStr == "" {
 		return gqlerror.Errorf("%s is required", fieldName)
 	}
-	// Basic format check - should be RFC3339
-	dateRegex := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$`)
-	if !dateRegex.MatchString(dateStr) {
-		return gqlerror.Errorf("Invalid %s format. Expected RFC3339 format (e.g., 2024-01-01T00:00:00Z)", fieldName)
+	// Accept both RFC3339 format (2024-01-01T00:00:00Z) and HTML date input format (2024-01-01)
+	rfc3339Regex := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$`)
+	dateOnlyRegex := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	if !rfc3339Regex.MatchString(dateStr) && !dateOnlyRegex.MatchString(dateStr) {
+		return gqlerror.Errorf("Invalid %s format. Expected RFC3339 format (e.g., 2024-01-01T00:00:00Z) or date format (e.g., 2024-01-01)", fieldName)
 	}
 	return nil
 }

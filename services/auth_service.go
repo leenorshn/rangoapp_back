@@ -8,7 +8,6 @@ import (
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type AuthService struct {
@@ -20,109 +19,68 @@ func NewAuthService(db *database.DB) *AuthService {
 }
 
 type RegisterInput struct {
-	Email            string
-	Password         string
-	Name             string
-	Phone            string
-	CompanyName      string
-	CompanyAddress   string
-	CompanyPhone     string
-	CompanyDescription string
-	CompanyType      string
-	CompanyEmail     *string
-	CompanyLogo      *string
-	CompanyRccm      *string
-	CompanyIdNat     *string
-	CompanyIdCommerce *string
-	StoreName        string
-	StoreAddress     string
-	StorePhone       string
+	Password string
+	Name     string
+	Phone    string
 }
 
 type AuthResponse struct {
-	Token string
-	User  *database.User
+	AccessToken  string
+	RefreshToken string
+	User         *database.User
 }
 
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthResponse, error) {
-	// Start a session for transaction
-	session, err := s.db.Client().StartSession()
-	if err != nil {
-		return nil, gqlerror.Errorf("Error starting session: %v", err)
-	}
-	defer session.EndSession(ctx)
-
-	var result *AuthResponse
-	err = mongo.WithSession(ctx, session, func(sc mongo.SessionContext) error {
-		// 1. Create Company
-		company, err := s.db.CreateCompany(
-			input.CompanyName,
-			input.CompanyAddress,
-			input.CompanyPhone,
-			input.CompanyDescription,
-			input.CompanyType,
-			input.CompanyEmail,
-			input.CompanyLogo,
-			input.CompanyRccm,
-			input.CompanyIdNat,
-			input.CompanyIdCommerce,
-		)
-		if err != nil {
-			return err
-		}
-
-		// 2. Create first Store
-		store, err := s.db.CreateStore(
-			input.StoreName,
-			input.StoreAddress,
-			input.StorePhone,
-			company.ID,
-		)
-		if err != nil {
-			return err
-		}
-
-		// 3. Create Admin User
-		user, err := s.db.CreateUser(
-			input.Name,
-			input.Phone,
-			input.Email,
-			input.Password,
-			"Admin",
-			company.ID,
-			[]primitive.ObjectID{store.ID}, // Admin has access to all stores (will be updated when more stores are added)
-			nil, // Admin doesn't have assignedStoreId
-		)
-		if err != nil {
-			return err
-		}
-
-		// 4. Generate JWT token
-		storeIDs := []string{store.ID.Hex()}
-		token, err := utils.JwtGenerate(ctx, user.ID.Hex(), company.ID.Hex(), user.Role, storeIDs, "")
-		if err != nil {
-			return gqlerror.Errorf("Error generating token: %v", err)
-		}
-
-		result = &AuthResponse{
-			Token: token,
-			User:  user,
-		}
-
-		return nil
-	})
-
+	// Create user without company (CompanyID will be NilObjectID)
+	// User can create company later using createCompany mutation
+	user, err := s.db.CreateUser(
+		input.Name,
+		input.Phone,
+		"", // Email removed from schema
+		input.Password,
+		"Admin", // First user is Admin
+		primitive.NilObjectID, // No company yet
+		[]primitive.ObjectID{}, // No stores yet
+		nil,                    // No assigned store
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	return result, nil
+	// Generate JWT access token with empty company ID
+	// User will need to create company and login again, or we can allow empty company ID
+	accessToken, err := utils.JwtGenerate(ctx, user.ID.Hex(), primitive.NilObjectID.Hex(), user.Role, []string{}, "")
+	if err != nil {
+		return nil, gqlerror.Errorf("Error generating access token: %v", err)
+	}
+
+	// Generate refresh token
+	refreshToken, err := utils.JwtGenerateRefresh(ctx, user.ID.Hex(), primitive.NilObjectID.Hex(), user.Role, []string{}, "")
+	if err != nil {
+		return nil, gqlerror.Errorf("Error generating refresh token: %v", err)
+	}
+
+	return &AuthResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		User:         user,
+	}, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, phone, password string) (*AuthResponse, error) {
 	user, err := s.db.AuthenticateUser(phone, password)
 	if err != nil {
 		return nil, err
+	}
+
+	// Vérifier l'abonnement si l'utilisateur a une company
+	if user.CompanyID != primitive.NilObjectID {
+		subscriptionService := NewSubscriptionService(s.db)
+		err = subscriptionService.ValidateSubscription(ctx, user.CompanyID.Hex())
+		if err != nil {
+			// Si l'essai est expiré, bloquer l'accès
+			return nil, gqlerror.Errorf("Votre période d'essai a expiré. Veuillez vous abonner pour continuer à utiliser l'application.")
+		}
 	}
 
 	// Convert storeIDs to strings
@@ -136,15 +94,22 @@ func (s *AuthService) Login(ctx context.Context, phone, password string) (*AuthR
 		assignedStoreID = user.AssignedStoreID.Hex()
 	}
 
-	// Generate JWT token
-	token, err := utils.JwtGenerate(ctx, user.ID.Hex(), user.CompanyID.Hex(), user.Role, storeIDs, assignedStoreID)
+	// Generate JWT access token
+	accessToken, err := utils.JwtGenerate(ctx, user.ID.Hex(), user.CompanyID.Hex(), user.Role, storeIDs, assignedStoreID)
 	if err != nil {
-		return nil, gqlerror.Errorf("Error generating token: %v", err)
+		return nil, gqlerror.Errorf("Error generating access token: %v", err)
+	}
+
+	// Generate refresh token
+	refreshToken, err := utils.JwtGenerateRefresh(ctx, user.ID.Hex(), user.CompanyID.Hex(), user.Role, storeIDs, assignedStoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error generating refresh token: %v", err)
 	}
 
 	return &AuthResponse{
-		Token: token,
-		User:  user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		User:         user,
 	}, nil
 }
 

@@ -55,6 +55,28 @@ func JwtGenerate(ctx context.Context, userID, companyID, role string, storeIDs [
 	return token, nil
 }
 
+// JwtGenerateRefresh generates a refresh token with longer expiration (7 days)
+func JwtGenerateRefresh(ctx context.Context, userID, companyID, role string, storeIDs []string, assignedStoreID string) (string, error) {
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, &JwtCustomClaim{
+		ID:              userID,
+		CompanyID:       companyID,
+		Role:            role,
+		StoreIDs:        storeIDs,
+		AssignedStoreID: assignedStoreID,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: time.Now().Add(time.Hour * 24 * 7).Unix(), // 7 days
+			IssuedAt:  time.Now().Unix(),
+		},
+	})
+
+	token, err := t.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
+
 func JwtValidate(ctx context.Context, token string) (*jwt.Token, error) {
 	return jwt.ParseWithClaims(token, &JwtCustomClaim{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

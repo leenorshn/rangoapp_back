@@ -18,6 +18,7 @@ import (
 var (
 	dbInstance *DB
 	once       sync.Once // Protects dbInstance initialization from race conditions
+	// memoryCache *MemoryCache // Disabled - Redis not configured
 )
 
 // Default timeout values
@@ -138,6 +139,7 @@ func connectWithRetry(client *mongo.Client, ctx context.Context, maxRetries int,
 type DB struct {
 	client   *mongo.Client
 	database *mongo.Database
+	// cacheHelper *CacheHelper // Cache helper (disabled - Redis not configured)
 }
 
 func (db *DB) Client() *mongo.Client {
@@ -157,13 +159,23 @@ func ConnectDB() *DB {
 			dbName = "rangodb"
 		}
 
-		client, err := mongo.NewClient(options.Client().ApplyURI(dbUrl))
+		connectTimeout := getConnectTimeout()
+		utils.Info("Connecting to MongoDB with timeout: %v", connectTimeout)
+
+		// Configure MongoDB client with optimized connection pool settings for Cloud Run
+		clientOptions := options.Client().ApplyURI(dbUrl).
+			SetMaxPoolSize(50).                         // Maximum number of connections in the pool
+			SetMinPoolSize(5).                          // Minimum number of connections to maintain
+			SetMaxConnIdleTime(30 * time.Second).       // Close connections after 30s of inactivity
+			SetConnectTimeout(connectTimeout).          // Timeout for initial connection
+			SetServerSelectionTimeout(5 * time.Second). // Timeout for server selection
+			SetSocketTimeout(30 * time.Second).         // Timeout for socket operations
+			SetHeartbeatInterval(10 * time.Second)      // Heartbeat interval for connection monitoring
+
+		client, err := mongo.NewClient(clientOptions)
 		if err != nil {
 			log.Fatal("Error creating MongoDB client:", err)
 		}
-
-		connectTimeout := getConnectTimeout()
-		utils.Info("Connecting to MongoDB with timeout: %v", connectTimeout)
 
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
@@ -177,11 +189,27 @@ func ConnectDB() *DB {
 			log.Fatal("Error connecting to MongoDB:", err)
 		}
 
-		utils.Info("Connected to MongoDB successfully")
+		// Ping the primary to verify connection with timeout
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer pingCancel()
+		if err := client.Ping(pingCtx, nil); err != nil {
+			utils.Error("Failed to ping MongoDB: %v", err)
+			log.Fatal("Error pinging MongoDB:", err)
+		}
+
+		utils.Info("Connected to MongoDB successfully (maxPoolSize: 50, minPoolSize: 5)")
+
+		// Cache disabled - Redis not configured
+		// To enable cache, uncomment and configure Redis:
+		// if memoryCache == nil {
+		//     memoryCache = NewMemoryCache()
+		// }
+		// cacheHelper := NewCacheHelper(memoryCache)
 
 		dbInstance = &DB{
 			client:   client,
 			database: client.Database(dbName),
+			// cacheHelper: cacheHelper, // Disabled
 		}
 
 		// Create indexes
@@ -235,6 +263,13 @@ func createIndexes(db *DB) {
 		{
 			Keys: map[string]interface{}{"storeId": 1},
 		},
+		{
+			// Compound index for storeId + name (for search queries)
+			Keys: bson.M{
+				"storeId": 1,
+				"name":    1,
+			},
+		},
 	}
 	_, err = productCollection.Indexes().CreateMany(ctx, productIndexes)
 	if err != nil {
@@ -280,6 +315,13 @@ func createIndexes(db *DB) {
 			// Simple index on storeId
 			Keys: bson.M{"storeId": 1},
 		},
+		{
+			// Compound index for storeId + createdAt (for period filters)
+			Keys: bson.M{
+				"storeId":   1,
+				"createdAt": -1,
+			},
+		},
 	}
 	_, err = factureCollection.Indexes().CreateMany(ctx, factureIndexes)
 	if err != nil {
@@ -299,6 +341,170 @@ func createIndexes(db *DB) {
 	_, err = rapportCollection.Indexes().CreateMany(ctx, rapportIndexes)
 	if err != nil {
 		utils.LogError(err, "Failed to create rapportStore indexes")
+	}
+
+	// Caisse transactions indexes
+	transCollection := colHelper(db, "trans")
+	transIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{"storeId": 1},
+		},
+		{
+			Keys: map[string]interface{}{"currency": 1},
+		},
+		{
+			Keys: map[string]interface{}{"date": -1}, // Descending for recent first
+		},
+		{
+			Keys: map[string]interface{}{"operation": 1},
+		},
+		{
+			// Compound index for common queries: storeId + currency + date
+			Keys: bson.M{
+				"storeId":  1,
+				"currency": 1,
+				"date":     -1,
+			},
+		},
+		{
+			// Compound index for storeId + createdAt
+			Keys: bson.M{
+				"storeId":   1,
+				"createdAt": -1,
+			},
+		},
+	}
+	_, err = transCollection.Indexes().CreateMany(ctx, transIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create trans indexes")
+	}
+
+	// Sales indexes for optimized queries
+	saleCollection := colHelper(db, "sales")
+	saleIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{"storeId": 1},
+		},
+		{
+			Keys: map[string]interface{}{"date": -1}, // Descending for recent first
+		},
+		{
+			Keys: map[string]interface{}{"createdAt": -1}, // Descending for recent first
+		},
+		{
+			Keys: map[string]interface{}{"currency": 1},
+		},
+		{
+			// Compound index for common queries: storeId + createdAt (for period filters)
+			Keys: bson.M{
+				"storeId":   1,
+				"createdAt": -1,
+			},
+		},
+		{
+			// Compound index for storeId + currency + createdAt
+			Keys: bson.M{
+				"storeId":   1,
+				"currency":  1,
+				"createdAt": -1,
+			},
+		},
+		{
+			// Compound index for storeId + date (for date-based queries)
+			Keys: bson.M{
+				"storeId": 1,
+				"date":    -1,
+			},
+		},
+		{
+			// Index for clientId queries
+			Keys: map[string]interface{}{"clientId": 1},
+		},
+	}
+	_, err = saleCollection.Indexes().CreateMany(ctx, saleIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create sales indexes")
+	}
+
+	// Subscriptions indexes
+	subscriptionCollection := colHelper(db, "subscriptions")
+	subscriptionIndexes := []mongo.IndexModel{
+		{
+			Keys:    map[string]interface{}{"companyId": 1},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys: map[string]interface{}{"status": 1},
+		},
+		{
+			Keys: map[string]interface{}{"trialEndDate": 1},
+		},
+		{
+			Keys: map[string]interface{}{"subscriptionEndDate": 1},
+		},
+	}
+	_, err = subscriptionCollection.Indexes().CreateMany(ctx, subscriptionIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create subscription indexes")
+	}
+
+	// Debts indexes
+	debtCollection := colHelper(db, "debts")
+	debtIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{"storeId": 1},
+		},
+		{
+			Keys: map[string]interface{}{"status": 1},
+		},
+		{
+			Keys: map[string]interface{}{"createdAt": -1},
+		},
+		{
+			// Compound index for storeId + status + createdAt
+			Keys: bson.M{
+				"storeId":   1,
+				"status":    1,
+				"createdAt": -1,
+			},
+		},
+		{
+			// Compound index for clientId + storeId
+			Keys: bson.M{
+				"clientId": 1,
+				"storeId":  1,
+			},
+		},
+	}
+	_, err = debtCollection.Indexes().CreateMany(ctx, debtIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create debt indexes")
+	}
+
+	// Inventories indexes
+	inventoryCollection := colHelper(db, "inventories")
+	inventoryIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{"storeId": 1},
+		},
+		{
+			Keys: map[string]interface{}{"status": 1},
+		},
+		{
+			Keys: map[string]interface{}{"createdAt": -1},
+		},
+		{
+			// Compound index for storeId + status + createdAt
+			Keys: bson.M{
+				"storeId":   1,
+				"status":    1,
+				"createdAt": -1,
+			},
+		},
+	}
+	_, err = inventoryCollection.Indexes().CreateMany(ctx, inventoryIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create inventory indexes")
 	}
 
 	utils.Info("MongoDB indexes created successfully")

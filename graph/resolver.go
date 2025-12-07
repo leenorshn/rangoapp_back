@@ -68,3 +68,8 @@ func (r *Resolver) HasStoreAccess(ctx context.Context, storeID string) (bool, er
 	// User has access only to assigned store
 	return raw.AssignedStoreID == storeID, nil
 }
+
+// CheckSubscription vérifie que l'abonnement de l'entreprise est actif
+func (r *Resolver) CheckSubscription(ctx context.Context) error {
+	return middlewares.ValidateSubscriptionInContext(ctx, r.DB)
+}

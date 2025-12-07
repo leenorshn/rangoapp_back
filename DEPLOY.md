@@ -45,6 +45,7 @@ Cloud Run nécessite que vous configuriez les variables d'environnement. Vous po
    - `DB_MAX_RETRIES` - (optionnel, défaut: 3)
    - `HEALTH_CHECK_INTERVAL_SECONDS` - (optionnel, défaut: 30)
    - `LOG_LEVEL` - (optionnel, défaut: INFO)
+   - `ALLOWED_ORIGINS` - (optionnel) Origines CORS autorisées, séparées par des virgules (ex: `https://yourdomain.com,https://app.vercel.app`)
 
 ### Option 2: Via gcloud CLI
 
@@ -60,6 +61,7 @@ DB_CONNECT_TIMEOUT_SECONDS: "10"
 DB_MAX_RETRIES: "3"
 HEALTH_CHECK_INTERVAL_SECONDS: "30"
 LOG_LEVEL: "INFO"
+ALLOWED_ORIGINS: "https://yourdomain.com,https://app.vercel.app"
 ```
 
 Puis utilisez-le lors du déploiement (voir ci-dessous).
@@ -185,6 +187,48 @@ Une fois déployé, votre service expose:
 - **Readiness**: `https://YOUR-SERVICE-URL/health/ready`
 - **Liveness**: `https://YOUR-SERVICE-URL/health/live`
 
+## Configuration CORS
+
+Pour permettre les requêtes depuis votre frontend (ex: Vercel, Netlify, etc.), vous devez configurer la variable d'environnement `ALLOWED_ORIGINS`:
+
+### Via la Console Google Cloud
+
+1. Allez sur [Cloud Run Console](https://console.cloud.google.com/run)
+2. Sélectionnez votre service
+3. Cliquez sur "EDIT & DEPLOY NEW REVISION"
+4. Dans l'onglet "Variables and Secrets", ajoutez:
+   - `ALLOWED_ORIGINS` avec la valeur: `https://rangoweb-ioelziq27-leenorshns-projects.vercel.app`
+   - Pour plusieurs origines, séparez-les par des virgules: `https://domain1.com,https://domain2.com`
+
+### Via gcloud CLI
+
+```bash
+gcloud run services update rangoapp-backend \
+  --region us-central1 \
+  --update-env-vars ALLOWED_ORIGINS="https://rangoweb-ioelziq27-leenorshns-projects.vercel.app"
+```
+
+### Notes importantes
+
+- **Pas de wildcards**: Les wildcards comme `*.vercel.app` ne sont pas supportés. Vous devez lister chaque origine exacte.
+- **Origines multiples**: Séparez les origines par des virgules sans espaces: `origin1.com,origin2.com`
+- **Par défaut**: Si `ALLOWED_ORIGINS` n'est pas défini, seules les origines localhost sont autorisées (pour le développement local)
+
+### Vérification CORS
+
+Pour tester si CORS est correctement configuré:
+
+```bash
+# Tester avec curl
+curl -H "Origin: https://your-frontend-domain.com" \
+     -H "Access-Control-Request-Method: POST" \
+     -H "Access-Control-Request-Headers: Content-Type" \
+     -X OPTIONS \
+     https://YOUR-SERVICE-URL/query -v
+```
+
+Vous devriez voir les en-têtes `Access-Control-Allow-Origin` dans la réponse.
+
 ## Dépannage
 
 ### Erreur: "Container failed to start"
@@ -200,6 +244,11 @@ Une fois déployé, votre service expose:
 - Cloud Run définit automatiquement `PORT`, ne le modifiez pas dans votre code
 - Le serveur utilise déjà `os.Getenv("PORT")` avec fallback sur 8080
 
+### Erreur CORS: "No 'Access-Control-Allow-Origin' header"
+- Vérifiez que `ALLOWED_ORIGINS` est configuré avec l'origine exacte de votre frontend
+- Vérifiez que l'origine dans la requête correspond exactement à celle dans `ALLOWED_ORIGINS` (sensible à la casse, avec/sans trailing slash)
+- Les requêtes OPTIONS (preflight) doivent être autorisées - le middleware CORS les gère automatiquement
+
 ## Coûts Estimés
 
 Cloud Run facture:
@@ -214,4 +263,5 @@ Avec `min-instances: 0`, vous ne payez que lorsque le service est actif.
 Pour plus d'informations:
 - [Documentation Cloud Run](https://cloud.google.com/run/docs)
 - [Pricing Cloud Run](https://cloud.google.com/run/pricing)
+
 
