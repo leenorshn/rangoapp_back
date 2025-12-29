@@ -411,6 +411,47 @@ func (r *mutationResolver) DeleteCompany(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// UpdateExchangeRates is the resolver for the updateExchangeRates field.
+func (r *mutationResolver) UpdateExchangeRates(ctx context.Context, rates []*model.ExchangeRateInput) (*model.Company, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Only Admin can update exchange rates
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only Admin can update exchange rates")
+	}
+
+	// Verify that the user has a company
+	if currentUser.CompanyID == primitive.NilObjectID {
+		return nil, gqlerror.Errorf("You must be associated with a company to update exchange rates")
+	}
+
+	// Validate input
+	if len(rates) == 0 {
+		return nil, gqlerror.Errorf("At least one exchange rate is required")
+	}
+
+	// Convert model.ExchangeRateInput to database.ExchangeRate
+	dbRates := make([]database.ExchangeRate, len(rates))
+	for i, rate := range rates {
+		dbRates[i] = database.ExchangeRate{
+			FromCurrency: rate.FromCurrency,
+			ToCurrency:   rate.ToCurrency,
+			Rate:         rate.Rate,
+		}
+	}
+
+	// Update exchange rates
+	company, err := r.DB.UpdateExchangeRates(currentUser.CompanyID.Hex(), currentUser.ID.Hex(), dbRates)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertCompanyToGraphQL(company, r.DB, true), nil
+}
+
 // CreateStore is the resolver for the createStore field.
 func (r *mutationResolver) CreateStore(ctx context.Context, input model.CreateStoreInput) (*model.Store, error) {
 	if err := validators.ValidateCreateStoreInput(&input); err != nil {
@@ -577,51 +618,10 @@ func (r *mutationResolver) CreateProduct(ctx context.Context, input model.Create
 		return nil, gqlerror.Errorf("Invalid store ID")
 	}
 
-	// Determine currency: use provided currency or default from store
-	currency := ""
-	if input.Currency != nil && *input.Currency != "" {
-		currency = *input.Currency
-		// Validate currency is supported by store
-		isValid, err := r.DB.ValidateStoreCurrency(input.StoreID, currency)
-		if err != nil {
-			return nil, err
-		}
-		if !isValid {
-			store, _ := r.DB.FindStoreByID(input.StoreID)
-			supportedCurrencies := []string{}
-			if store != nil {
-				supportedCurrencies = store.SupportedCurrencies
-			}
-			return nil, gqlerror.Errorf("Currency %s is not supported by this store. Supported currencies: %v", currency, supportedCurrencies)
-		}
-	} else {
-		// Use default currency from store
-		defaultCurrency, err := r.DB.GetStoreDefaultCurrency(input.StoreID)
-		if err != nil {
-			return nil, err
-		}
-		currency = defaultCurrency
-	}
-
-	// Handle provider ID if provided
-	var providerID *primitive.ObjectID
-	if input.ProviderID != nil && *input.ProviderID != "" {
-		providerObjectID, err := primitive.ObjectIDFromHex(*input.ProviderID)
-		if err != nil {
-			return nil, gqlerror.Errorf("Invalid provider ID")
-		}
-		providerID = &providerObjectID
-	}
-
 	product, err := r.DB.CreateProduct(
 		input.Name,
 		input.Mark,
-		input.PriceVente,
-		input.PriceAchat,
-		input.Stock,
-		currency,
 		storeID,
-		providerID,
 	)
 	if err != nil {
 		return nil, err
@@ -654,48 +654,10 @@ func (r *mutationResolver) UpdateProduct(ctx context.Context, id string, input m
 		return nil, gqlerror.Errorf("You don't have access to this product's store")
 	}
 
-	// Handle currency update if provided
-	var currency *string
-	if input.Currency != nil && *input.Currency != "" {
-		// Validate currency is supported by store
-		isValid, err := r.DB.ValidateStoreCurrency(product.StoreID.Hex(), *input.Currency)
-		if err != nil {
-			return nil, err
-		}
-		if !isValid {
-			store, _ := r.DB.FindStoreByID(product.StoreID.Hex())
-			supportedCurrencies := []string{}
-			if store != nil {
-				supportedCurrencies = store.SupportedCurrencies
-			}
-			return nil, gqlerror.Errorf("Currency %s is not supported by this store. Supported currencies: %v", *input.Currency, supportedCurrencies)
-		}
-		currency = input.Currency
-	}
-
-	// Handle provider ID if provided
-	var providerID *primitive.ObjectID
-	if input.ProviderID != nil {
-		if *input.ProviderID != "" {
-			providerObjectID, err := primitive.ObjectIDFromHex(*input.ProviderID)
-			if err != nil {
-				return nil, gqlerror.Errorf("Invalid provider ID")
-			}
-			providerID = &providerObjectID
-		}
-		// If providerID is an empty string, we want to set it to nil to remove the provider
-		// providerID will remain nil in this case
-	}
-
 	updatedProduct, err := r.DB.UpdateProduct(
 		id,
 		input.Name,
 		input.Mark,
-		input.PriceVente,
-		input.PriceAchat,
-		input.Stock,
-		currency,
-		providerID,
 	)
 	if err != nil {
 		return nil, err
@@ -733,6 +695,181 @@ func (r *mutationResolver) DeleteProduct(ctx context.Context, id string) (bool, 
 	return true, nil
 }
 
+// SupplyStock is the resolver for the supplyStock field.
+func (r *mutationResolver) SupplyStock(ctx context.Context, input model.StockSupplyInput) (*model.StockSupply, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Validate input
+	if err := validators.ValidateObjectID(input.ProductID, "Product ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateObjectID(input.StoreID, "Store ID"); err != nil {
+		return nil, err
+	}
+	if err := validators.ValidateObjectID(input.ProviderID, "Provider ID"); err != nil {
+		return nil, err
+	}
+	if input.Quantity <= 0 {
+		return nil, gqlerror.Errorf("Quantity must be greater than 0")
+	}
+	if input.PriceAchat <= 0 {
+		return nil, gqlerror.Errorf("Price d'achat must be greater than 0")
+	}
+	if input.PriceVente < input.PriceAchat {
+		return nil, gqlerror.Errorf("Price de vente must be >= price d'achat")
+	}
+	if input.PaymentType != "cash" && input.PaymentType != "debt" {
+		return nil, gqlerror.Errorf("Payment type must be 'cash' or 'debt'")
+	}
+	if input.PaymentType == "debt" && (input.AmountPaid == nil || *input.AmountPaid < 0) {
+		return nil, gqlerror.Errorf("Amount paid is required when payment type is 'debt'")
+	}
+
+	// Verify store access
+	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this store")
+	}
+
+	// Convert IDs
+	productID, _ := primitive.ObjectIDFromHex(input.ProductID)
+	storeID, _ := primitive.ObjectIDFromHex(input.StoreID)
+	providerID, _ := primitive.ObjectIDFromHex(input.ProviderID)
+	operatorID := currentUser.ID
+
+	// Determine currency
+	currency := ""
+	if input.Currency != nil && *input.Currency != "" {
+		currency = *input.Currency
+		isValid, err := r.DB.ValidateStoreCurrency(input.StoreID, currency)
+		if err != nil {
+			return nil, err
+		}
+		if !isValid {
+			return nil, gqlerror.Errorf("Currency %s is not supported by this store", currency)
+		}
+	} else {
+		defaultCurrency, err := r.DB.GetStoreDefaultCurrency(input.StoreID)
+		if err != nil {
+			return nil, err
+		}
+		currency = defaultCurrency
+	}
+
+	// Parse date
+	date := time.Now()
+	if input.Date != nil && *input.Date != "" {
+		parsedDate, err := time.Parse(time.RFC3339, *input.Date)
+		if err != nil {
+			return nil, gqlerror.Errorf("Invalid date format")
+		}
+		date = parsedDate
+	}
+
+	// Create or update ProductInStock
+	productInStock, err := r.DB.CreateProductInStock(
+		productID,
+		input.PriceVente,
+		input.PriceAchat,
+		input.Quantity,
+		currency,
+		storeID,
+		providerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate total amount and debt
+	totalAmount := input.PriceAchat * input.Quantity
+	amountPaid := 0.0
+	if input.PaymentType == "cash" {
+		amountPaid = totalAmount
+	} else if input.AmountPaid != nil {
+		amountPaid = *input.AmountPaid
+	}
+	amountDue := totalAmount - amountPaid
+
+	// Create stock supply first (without debt ID for now)
+	supply, err := r.DB.CreateStockSupply(
+		productID,
+		productInStock.ID,
+		input.Quantity,
+		input.PriceAchat,
+		input.PriceVente,
+		currency,
+		storeID,
+		providerID,
+		operatorID,
+		input.PaymentType,
+		nil, // Will be set after creating debt
+		date,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create provider debt if payment type is "debt" (now we have the supply ID)
+	if input.PaymentType == "debt" && amountDue > 0 {
+		_, err := r.DB.CreateProviderDebt(
+			supply.ID,
+			providerID,
+			storeID,
+			totalAmount,
+			amountPaid,
+			amountDue,
+			currency,
+		)
+		if err != nil {
+			return nil, err
+		}
+		// Note: providerDebt is created but not currently linked to supply
+
+		// Update supply with debt ID
+		// Note: We would need an UpdateStockSupply function, but for now the debt reference is enough
+		// The supply can be queried with the debt ID from the debt side
+	}
+
+	// Create stock movement (ENTREE)
+	_, err = r.DB.CreateStockMovement(
+		productInStock.ID.Hex(),
+		input.StoreID,
+		"ENTREE",
+		input.Quantity,
+		input.PriceAchat,
+		currency,
+		operatorID,
+		fmt.Sprintf("Approvisionnement - Fournisseur: %s", input.ProviderID),
+		fmt.Sprintf("supply-%s", supply.ID.Hex()),
+		"SUPPLY",
+		&supply.ID,
+	)
+	if err != nil {
+		utils.LogError(err, "Error creating stock movement for supply")
+	}
+
+	// Create caisse transaction (SORTIE) if paid cash
+	if input.PaymentType == "cash" {
+		_, err = r.DB.CreateTrans(
+			"Sortie",
+			totalAmount,
+			fmt.Sprintf("Achat stock - Produit: %s, Fournisseur: %s", input.ProductID, input.ProviderID),
+			currency,
+			operatorID,
+			storeID,
+			&date,
+		)
+		if err != nil {
+			utils.LogError(err, "Error creating caisse transaction for supply")
+		}
+	}
+
+	return convertStockSupplyToGraphQL(supply, r.DB), nil
+}
+
 // CreateClient is the resolver for the createClient field.
 func (r *mutationResolver) CreateClient(ctx context.Context, input model.CreateClientInput) (*model.Client, error) {
 	if err := validators.ValidateCreateClientInput(&input); err != nil {
@@ -759,7 +896,7 @@ func (r *mutationResolver) CreateClient(ctx context.Context, input model.CreateC
 		return nil, gqlerror.Errorf("Invalid store ID")
 	}
 
-	client, err := r.DB.CreateClient(input.Name, input.Phone, storeID)
+	client, err := r.DB.CreateClient(input.Name, input.Phone, storeID, input.CreditLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -791,7 +928,7 @@ func (r *mutationResolver) UpdateClient(ctx context.Context, id string, input mo
 		return nil, gqlerror.Errorf("You don't have access to this client's store")
 	}
 
-	updatedClient, err := r.DB.UpdateClient(id, input.Name, input.Phone)
+	updatedClient, err := r.DB.UpdateClient(id, input.Name, input.Phone, input.CreditLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -826,6 +963,46 @@ func (r *mutationResolver) DeleteClient(ctx context.Context, id string) (bool, e
 	}
 
 	return true, nil
+}
+
+// UpdateClientCreditLimit is the resolver for the updateClientCreditLimit field.
+func (r *mutationResolver) UpdateClientCreditLimit(ctx context.Context, clientID string, creditLimit float64) (*model.Client, error) {
+	if err := validators.ValidateObjectID(clientID, "Client ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Seuls les admins peuvent modifier les limites de crédit
+	if currentUser.Role != "Admin" {
+		return nil, gqlerror.Errorf("Only admins can update credit limits")
+	}
+
+	// Get client to verify store access
+	client, err := r.DB.FindClientByID(clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, client.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this client's store")
+	}
+
+	// Valider que la limite est positive
+	if creditLimit < 0 {
+		return nil, gqlerror.Errorf("Credit limit cannot be negative")
+	}
+
+	// Mettre à jour la limite de crédit
+	updatedClient, err := r.DB.UpdateClientCreditLimit(clientID, creditLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertClientToGraphQL(updatedClient, r.DB), nil
 }
 
 // CreateProvider is the resolver for the createProvider field.
@@ -977,10 +1154,9 @@ func (r *mutationResolver) CreateFacture(ctx context.Context, input model.Create
 			return nil, gqlerror.Errorf("Product %s does not belong to store", p.ProductID)
 		}
 
-		// Check stock
-		if product.Stock < float64(p.Quantity) {
-			return nil, gqlerror.Errorf("Insufficient stock for product %s", p.ProductID)
-		}
+		// Note: Factures use Product templates, not ProductInStock
+		// Stock checking is not applicable for factures as they are just invoices
+		// The actual stock management is done through ProductInStock
 
 		factureProducts = append(factureProducts, database.FactureProduct{
 			ProductID: productID,
@@ -988,11 +1164,7 @@ func (r *mutationResolver) CreateFacture(ctx context.Context, input model.Create
 			Price:     p.Price,
 		})
 
-		// Update stock
-		err = r.DB.UpdateProductStock(p.ProductID, -float64(p.Quantity))
-		if err != nil {
-			return nil, err
-		}
+		// Note: Stock updates are no longer done here since Product is now just a template
 	}
 
 	// Determine currency: use provided currency or default from store
@@ -1448,24 +1620,24 @@ func (r *mutationResolver) CreateSale(ctx context.Context, input model.CreateSal
 	// Convert basket products
 	var basket []database.ProductInBasket
 	for _, p := range input.Basket {
-		productID, err := primitive.ObjectIDFromHex(p.ProductID)
+		productInStockID, err := primitive.ObjectIDFromHex(p.ProductInStockID)
 		if err != nil {
-			return nil, gqlerror.Errorf("Invalid product ID: %s", p.ProductID)
+			return nil, gqlerror.Errorf("Invalid product in stock ID: %s", p.ProductInStockID)
 		}
 
-		// Verify product belongs to store
-		product, err := r.DB.FindProductByID(p.ProductID)
+		// Verify product in stock belongs to store
+		productInStock, err := r.DB.FindProductInStockByID(p.ProductInStockID)
 		if err != nil {
-			return nil, gqlerror.Errorf("Product not found: %s", p.ProductID)
+			return nil, gqlerror.Errorf("Product in stock not found: %s", p.ProductInStockID)
 		}
-		if product.StoreID != storeID {
-			return nil, gqlerror.Errorf("Product %s does not belong to store", p.ProductID)
+		if productInStock.StoreID != storeID {
+			return nil, gqlerror.Errorf("Product in stock %s does not belong to store", p.ProductInStockID)
 		}
 
 		basket = append(basket, database.ProductInBasket{
-			ProductID: productID,
-			Quantity:  p.Quantity,
-			Price:     p.Price,
+			ProductInStockID: productInStockID,
+			Quantity:         p.Quantity,
+			Price:            p.Price,
 		})
 	}
 
@@ -1577,8 +1749,13 @@ func (r *mutationResolver) CreateFactureFromSale(ctx context.Context, saleID str
 	var factureProducts []database.FactureProduct
 	var totalQuantity int
 	for _, item := range sale.Basket {
+		// Note: FactureProduct still uses ProductID, we need to get it from ProductInStock
+		productInStock, err := r.DB.FindProductInStockByID(item.ProductInStockID.Hex())
+		if err != nil {
+			return nil, gqlerror.Errorf("Product in stock not found: %s", item.ProductInStockID.Hex())
+		}
 		factureProducts = append(factureProducts, database.FactureProduct{
-			ProductID: item.ProductID,
+			ProductID: productInStock.ProductID,
 			Quantity:  int(item.Quantity),
 			Price:     item.Price,
 		})
@@ -1652,6 +1829,45 @@ func (r *mutationResolver) PayDebt(ctx context.Context, debtID string, amount fl
 	}
 
 	return convertDebtToGraphQL(updatedDebt, r.DB), nil
+}
+
+// PayProviderDebt is the resolver for the payProviderDebt field.
+func (r *mutationResolver) PayProviderDebt(ctx context.Context, providerDebtID string, amount float64, description string) (*model.ProviderDebt, error) {
+	if err := validators.ValidateObjectID(providerDebtID, "Provider Debt ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Get provider debt to verify store access
+	debt, err := r.DB.GetProviderDebtByID(providerDebtID)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, debt.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this provider debt's store")
+	}
+
+	// Pay the debt
+	updatedDebt, payment, err := r.DB.PayProviderDebt(
+		providerDebtID,
+		amount,
+		currentUser.ID,
+		debt.StoreID,
+		description,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Log payment creation (payment is already created in PayProviderDebt)
+	_ = payment
+
+	return convertProviderDebtToGraphQL(updatedDebt, r.DB), nil
 }
 
 // CreateInventory is the resolver for the createInventory field.
@@ -1958,6 +2174,59 @@ func (r *queryResolver) Company(ctx context.Context) (*model.Company, error) {
 	return convertCompanyToGraphQL(company, r.DB, true), nil
 }
 
+// ExchangeRates is the resolver for the exchangeRates field.
+func (r *queryResolver) ExchangeRates(ctx context.Context) ([]*model.ExchangeRate, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify that the user has a company
+	if currentUser.CompanyID == primitive.NilObjectID {
+		return nil, gqlerror.Errorf("User does not have a company yet")
+	}
+
+	// Get exchange rates from database
+	rates, err := r.DB.GetCompanyExchangeRates(currentUser.CompanyID.Hex())
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to GraphQL model
+	var rateModels []*model.ExchangeRate
+	for _, rate := range rates {
+		rateModels = append(rateModels, convertExchangeRateToGraphQL(&rate))
+	}
+
+	return rateModels, nil
+}
+
+// ConvertCurrency is the resolver for the convertCurrency field.
+func (r *queryResolver) ConvertCurrency(ctx context.Context, amount float64, fromCurrency string, toCurrency string) (float64, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return 0, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify that the user has a company
+	if currentUser.CompanyID == primitive.NilObjectID {
+		return 0, gqlerror.Errorf("User does not have a company yet")
+	}
+
+	// Validate amount
+	if amount < 0 {
+		return 0, gqlerror.Errorf("Amount must be positive")
+	}
+
+	// Convert currency using the company's exchange rates
+	convertedAmount, err := r.DB.ConvertCurrency(currentUser.CompanyID.Hex(), amount, fromCurrency, toCurrency)
+	if err != nil {
+		return 0, err
+	}
+
+	return convertedAmount, nil
+}
+
 // Subscription is the resolver for the subscription field.
 func (r *queryResolver) Subscription(ctx context.Context) (*model.CompanySubscription, error) {
 	currentUser, err := r.GetUserFromContext(ctx)
@@ -2014,6 +2283,35 @@ func (r *queryResolver) CheckSubscriptionStatus(ctx context.Context) (*model.Sub
 		Message:      nil,
 		Subscription: subModel,
 	}, nil
+}
+
+// SubscriptionPlans is the resolver for the subscriptionPlans field.
+func (r *queryResolver) SubscriptionPlans(ctx context.Context) ([]*model.SubscriptionPlan, error) {
+	plans, err := r.DB.GetAllSubscriptionPlans()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.SubscriptionPlan
+	for _, plan := range plans {
+		result = append(result, convertSubscriptionPlanToGraphQL(plan))
+	}
+
+	return result, nil
+}
+
+// SubscriptionPlan is the resolver for the subscriptionPlan field.
+func (r *queryResolver) SubscriptionPlan(ctx context.Context, id string) (*model.SubscriptionPlan, error) {
+	if id == "" {
+		return nil, gqlerror.Errorf("Plan ID cannot be empty")
+	}
+
+	plan, err := r.DB.GetSubscriptionPlanByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertSubscriptionPlanToGraphQL(plan), nil
 }
 
 // Stores is the resolver for the stores field.
@@ -2105,6 +2403,7 @@ func (r *queryResolver) Products(ctx context.Context, storeID *string) ([]*model
 		}
 	}
 
+	// Find all products in accessible stores (products are now just templates)
 	products, err := r.DB.FindProductsByStoreIDs(storeIDs)
 	if err != nil {
 		return nil, err
@@ -2140,6 +2439,212 @@ func (r *queryResolver) Product(ctx context.Context, id string) (*model.Product,
 	}
 
 	return convertProductToGraphQL(product, r.DB), nil
+}
+
+// ProductsInStock is the resolver for the productsInStock field.
+func (r *queryResolver) ProductsInStock(ctx context.Context, storeID *string, productID *string, providerID *string) ([]*model.ProductInStock, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
+			return nil, err
+		}
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	var productsInStock []*database.ProductInStock
+	if productID != nil && *productID != "" {
+		productsInStock, err = r.DB.FindProductsInStockByProductID(*productID, storeIDs)
+	} else if providerID != nil && *providerID != "" {
+		productsInStock, err = r.DB.FindProductsInStockByProviderID(*providerID, storeIDs)
+	} else {
+		productsInStock, err = r.DB.FindProductsInStockByStoreIDs(storeIDs)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.ProductInStock
+	for _, pis := range productsInStock {
+		result = append(result, convertProductInStockToGraphQL(pis, r.DB))
+	}
+
+	return result, nil
+}
+
+// ProductInStock is the resolver for the productInStock field.
+func (r *queryResolver) ProductInStock(ctx context.Context, id string) (*model.ProductInStock, error) {
+	if err := validators.ValidateObjectID(id, "Product In Stock ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	productInStock, err := r.DB.FindProductInStockByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, productInStock.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this product in stock's store")
+	}
+
+	return convertProductInStockToGraphQL(productInStock, r.DB), nil
+}
+
+// StockSupplies is the resolver for the stockSupplies field.
+func (r *queryResolver) StockSupplies(ctx context.Context, storeID *string, productID *string, providerID *string) ([]*model.StockSupply, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
+			return nil, err
+		}
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	var supplies []*database.StockSupply
+	if productID != nil && *productID != "" {
+		supplies, err = r.DB.FindStockSuppliesByProductID(*productID, storeIDs)
+	} else if providerID != nil && *providerID != "" {
+		supplies, err = r.DB.FindStockSuppliesByProviderID(*providerID, storeIDs)
+	} else {
+		supplies, err = r.DB.FindStockSuppliesByStoreIDs(storeIDs)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.StockSupply
+	for _, supply := range supplies {
+		result = append(result, convertStockSupplyToGraphQL(supply, r.DB))
+	}
+
+	return result, nil
+}
+
+// StockSupply is the resolver for the stockSupply field.
+func (r *queryResolver) StockSupply(ctx context.Context, id string) (*model.StockSupply, error) {
+	if err := validators.ValidateObjectID(id, "Stock Supply ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	supply, err := r.DB.FindStockSupplyByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, supply.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this stock supply's store")
+	}
+
+	return convertStockSupplyToGraphQL(supply, r.DB), nil
+}
+
+// ProviderDebts is the resolver for the providerDebts field.
+func (r *queryResolver) ProviderDebts(ctx context.Context, storeID *string, providerID *string, status *string) ([]*model.ProviderDebt, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
+			return nil, err
+		}
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	var debts []*database.ProviderDebt
+	if providerID != nil && *providerID != "" {
+		storeIDStr := storeID
+		debts, err = r.DB.GetProviderDebtsByProviderID(*providerID, storeIDStr)
+	} else {
+		debts, err = r.DB.GetStoreProviderDebts(storeIDs, status)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*model.ProviderDebt
+	for _, debt := range debts {
+		result = append(result, convertProviderDebtToGraphQL(debt, r.DB))
+	}
+
+	return result, nil
+}
+
+// ProviderDebt is the resolver for the providerDebt field.
+func (r *queryResolver) ProviderDebt(ctx context.Context, id string) (*model.ProviderDebt, error) {
+	if err := validators.ValidateObjectID(id, "Provider Debt ID"); err != nil {
+		return nil, err
+	}
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	debt, err := r.DB.GetProviderDebtByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAccess, err := r.HasStoreAccess(ctx, debt.StoreID.Hex())
+	if err != nil || !hasAccess {
+		return nil, gqlerror.Errorf("You don't have access to this provider debt's store")
+	}
+
+	return convertProviderDebtToGraphQL(debt, r.DB), nil
 }
 
 // Clients is the resolver for the clients field.
@@ -2942,6 +3447,151 @@ func (r *queryResolver) ActiveInventory(ctx context.Context, storeID string) (*m
 	}
 
 	return convertInventoryToGraphQL(activeInventory, r.DB), nil
+}
+
+// StockReport is the resolver for the stockReport field.
+func (r *queryResolver) StockReport(ctx context.Context, storeID *string, productID *string, currency *string, period *string, startDate *string, endDate *string, typeArg *model.StockMovementType) (*model.StockReport, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access if storeID is provided
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+	} else {
+		// If no storeID provided, use first accessible store
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		if len(accessibleStoreIDs) == 0 {
+			return nil, gqlerror.Errorf("No accessible stores")
+		}
+		storeID = &accessibleStoreIDs[0]
+	}
+
+	// Convert movement type
+	var movementType *string
+	if typeArg != nil {
+		typeStr := string(*typeArg)
+		movementType = &typeStr
+	}
+
+	// Get stock report
+	report, err := r.DB.GetStockReport(storeID, productID, currency, period, startDate, endDate, movementType)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertStockReportToGraphQL(report, r.DB), nil
+}
+
+// StockMovements is the resolver for the stockMovements field.
+func (r *queryResolver) StockMovements(ctx context.Context, storeID *string, productID *string, typeArg *model.StockMovementType, startDate *string, endDate *string, limit *int, offset *int) ([]*model.StockMovement, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Determine store IDs
+	var storeIDs []primitive.ObjectID
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+		id, _ := primitive.ObjectIDFromHex(*storeID)
+		storeIDs = []primitive.ObjectID{id}
+	} else {
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		for _, id := range accessibleStoreIDs {
+			objectID, _ := primitive.ObjectIDFromHex(id)
+			storeIDs = append(storeIDs, objectID)
+		}
+	}
+
+	if len(storeIDs) == 0 {
+		return []*model.StockMovement{}, nil
+	}
+
+	// Convert movement type
+	var movementType *string
+	if typeArg != nil {
+		typeStr := string(*typeArg)
+		movementType = &typeStr
+	}
+
+	// Parse dates
+	var startDatePtr *time.Time
+	var endDatePtr *time.Time
+	if startDate != nil {
+		parsed, err := time.Parse(time.RFC3339, *startDate)
+		if err != nil {
+			parsed, err = time.Parse("2006-01-02", *startDate)
+			if err != nil {
+				return nil, gqlerror.Errorf("Invalid start date format")
+			}
+		}
+		startDatePtr = &parsed
+	}
+	if endDate != nil {
+		parsed, err := time.Parse(time.RFC3339, *endDate)
+		if err != nil {
+			parsed, err = time.Parse("2006-01-02", *endDate)
+			if err != nil {
+				return nil, gqlerror.Errorf("Invalid end date format")
+			}
+		}
+		// Set to end of day
+		parsed = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 999999999, parsed.Location())
+		endDatePtr = &parsed
+	}
+
+	// Get movements
+	movements, err := r.DB.FindStockMovements(storeIDs, productID, movementType, startDatePtr, endDatePtr, nil, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to GraphQL models
+	result := make([]*model.StockMovement, len(movements))
+	for i, movement := range movements {
+		result[i] = convertStockMovementToGraphQL(movement, r.DB)
+	}
+
+	return result, nil
+}
+
+// StockStats is the resolver for the stockStats field.
+func (r *queryResolver) StockStats(ctx context.Context, storeID *string, productID *string, period *string, startDate *string, endDate *string) (*model.StockStats, error) {
+	currentUser, err := r.GetUserFromContext(ctx)
+	if err != nil || currentUser == nil {
+		return nil, gqlerror.Errorf("Unauthorized")
+	}
+
+	// Verify store access if storeID is provided
+	if storeID != nil {
+		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
+		if err != nil || !hasAccess {
+			return nil, gqlerror.Errorf("You don't have access to this store")
+		}
+	} else {
+		// If no storeID provided, use first accessible store
+		accessibleStoreIDs, _ := r.GetAccessibleStoreIDs(ctx)
+		if len(accessibleStoreIDs) == 0 {
+			return nil, gqlerror.Errorf("No accessible stores")
+		}
+		storeID = &accessibleStoreIDs[0]
+	}
+
+	// Get stock stats
+	stats, err := r.DB.GetStockStats(storeID, productID, period, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	return convertStockStatsToGraphQL(stats, r.DB), nil
 }
 
 // Mutation returns MutationResolver implementation.

@@ -20,6 +20,15 @@ type User {
   updatedAt: String!
 }
 
+type ExchangeRate {
+  fromCurrency: String!
+  toCurrency: String!
+  rate: Float!
+  isDefault: Boolean! # Indique si c'est le taux par défaut (non modifiable facilement)
+  updatedAt: String!
+  updatedBy: String! # ID de l'utilisateur qui a modifié le taux
+}
+
 type Company {
   id: ID!
   name: String!
@@ -34,6 +43,7 @@ type Company {
   idCommerce: String
   stores: [Store!]! # Liste des boutiques de l'entreprise
   subscription: CompanySubscription! # Abonnement de l'entreprise
+  exchangeRates: [ExchangeRate!]! # Taux de change configurés pour l'entreprise
   createdAt: String!
   updatedAt: String!
 }
@@ -55,14 +65,24 @@ type Product {
   id: ID!
   name: String!
   mark: String!
+  storeId: String!
+  store: Store!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ProductInStock {
+  id: ID!
+  productId: String!
+  product: Product! # Référence au produit template
   priceVente: Float!
   priceAchat: Float!
   currency: String! # Currency du produit (USD, EUR, CDF)
   stock: Float!
   storeId: String!
   store: Store!
-  providerId: String # ID du fournisseur (optionnel)
-  provider: Provider # Fournisseur du produit (optionnel)
+  providerId: String! # ID du fournisseur (obligatoire lors de l'approvisionnement)
+  provider: Provider! # Fournisseur du produit
   createdAt: String!
   updatedAt: String!
 }
@@ -73,6 +93,9 @@ type Client {
   phone: String!
   storeId: String!
   store: Store!
+  creditLimit: Float! # Limite de crédit autorisée (0 = pas de crédit)
+  currentDebt: Float! # Dette actuelle (somme des dettes impayées)
+  availableCredit: Float! # Crédit disponible (creditLimit - currentDebt)
   createdAt: String!
   updatedAt: String!
 }
@@ -151,6 +174,21 @@ type SubscriptionStatus {
   isValid: Boolean!
   message: String
   subscription: CompanySubscription
+}
+
+type SubscriptionPlan {
+  id: ID!
+  name: String!
+  price: Float!
+  currency: String!  # "USD", "EUR", "CDF", etc.
+  billingPeriod: String!  # "monthly", "yearly"
+  description: String!
+  features: [String!]!
+  maxStores: Int  # null = illimité
+  maxUsers: Int   # null = illimité
+  isActive: Boolean!
+  createdAt: String!
+  updatedAt: String!
 }
 
 type CaisseTransaction {
@@ -275,6 +313,63 @@ type DebtPayment {
   createdAt: String!
 }
 
+type ProviderDebt {
+  id: ID!
+  supplyId: String! # ID de l'approvisionnement associé
+  supply: StockSupply! # Approvisionnement associé
+  providerId: String!
+  provider: Provider! # Fournisseur à qui on doit
+  storeId: String!
+  store: Store!
+  totalAmount: Float! # Montant total de l'approvisionnement
+  amountPaid: Float! # Montant déjà payé
+  amountDue: Float! # Montant restant à payer
+  currency: String! # "USD", "EUR" or "CDF"
+  status: String! # "paid", "partial", "unpaid"
+  payments: [ProviderDebtPayment!]! # Historique des paiements
+  createdAt: String!
+  updatedAt: String!
+  paidAt: String # Date de paiement complet (si status = "paid")
+}
+
+type ProviderDebtPayment {
+  id: ID!
+  providerDebtId: String!
+  providerDebt: ProviderDebt! # Dette associée
+  amount: Float!
+  currency: String! # "USD", "EUR" or "CDF"
+  operatorId: String!
+  operator: User! # Utilisateur qui a enregistré le paiement
+  storeId: String!
+  store: Store!
+  description: String!
+  createdAt: String!
+}
+
+type StockSupply {
+  id: ID!
+  productId: String!
+  product: Product! # Produit template
+  productInStockId: String!
+  productInStock: ProductInStock! # Produit en stock créé
+  quantity: Float!
+  priceAchat: Float!
+  priceVente: Float!
+  currency: String!
+  providerId: String!
+  provider: Provider!
+  storeId: String!
+  store: Store!
+  operatorId: String!
+  operator: User! # Utilisateur qui a fait l'approvisionnement
+  paymentType: String! # "cash" ou "debt"
+  providerDebtId: String # ID de la dette si paymentType = "debt"
+  providerDebt: ProviderDebt # Dette associée si paymentType = "debt"
+  date: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
 type SalesStats {
   totalSales: Int! # Total number of sales
   totalRevenue: Float! # Total revenue (sum of pricePayed)
@@ -284,8 +379,8 @@ type SalesStats {
 }
 
 type SaleProduct {
-  productId: String!
-  product: Product!
+  productInStockId: String!
+  productInStock: ProductInStock!
   quantity: Float!
   price: Float!
 }
@@ -320,6 +415,100 @@ type InventoryItem {
   countedBy: String! # ID de la personne qui a compté
   countedByUser: User! # Utilisateur qui a compté
   countedAt: String! # Date et heure du comptage
+}
+
+type StockMovement {
+  id: ID!
+  productId: ID!
+  product: Product!
+  storeId: ID!
+  store: Store!
+  type: StockMovementType! # "ENTREE" | "SORTIE" | "AJUSTEMENT"
+  quantity: Float!
+  unitPrice: Float!
+  totalValue: Float!
+  currency: String!
+  reason: String
+  reference: String # Référence à une vente, achat, inventaire, etc.
+  referenceType: String # "SALE", "PURCHASE", "INVENTORY", "ADJUSTMENT", "TRANSFER"
+  referenceId: ID
+  operatorId: ID!
+  operator: User!
+  createdAt: String!
+  updatedAt: String!
+}
+
+enum StockMovementType {
+  ENTREE
+  SORTIE
+  AJUSTEMENT
+}
+
+type StockReport {
+  storeId: ID!
+  store: Store!
+  currency: String!
+  period: String! # "day", "week", "month", "year", "custom"
+  startDate: String!
+  endDate: String!
+  
+  # Totaux généraux
+  totalEntrees: Float!
+  totalSorties: Float!
+  totalAjustements: Float!
+  soldeInitial: Float!
+  soldeFinal: Float!
+  nombreMouvements: Int!
+  
+  # Détails par produit
+  mouvementsParProduit: [StockMovementByProduct!]!
+  
+  # Résumé par jour
+  resumeParJour: [StockReportResumeJour!]!
+  
+  # Liste complète des mouvements
+  mouvements: [StockMovement!]!
+}
+
+type StockMovementByProduct {
+  productId: ID!
+  product: Product!
+  totalEntrees: Float!
+  totalSorties: Float!
+  totalAjustements: Float!
+  soldeInitial: Float!
+  soldeFinal: Float!
+  nombreMouvements: Int!
+  valeurTotaleEntrees: Float!
+  valeurTotaleSorties: Float!
+}
+
+type StockReportResumeJour {
+  date: String!
+  entrees: Float!
+  sorties: Float!
+  ajustements: Float!
+  solde: Float!
+  nombreMouvements: Int!
+  valeurTotaleEntrees: Float!
+  valeurTotaleSorties: Float!
+}
+
+type StockStats {
+  totalProducts: Int!
+  totalValue: Float!
+  productsLowStock: Int! # Produits en stock faible (< seuil)
+  productsOutOfStock: Int! # Produits en rupture
+  totalEntrees: Float!
+  totalSorties: Float!
+  topProductsByMovements: [ProductMovementStats!]!
+}
+
+type ProductMovementStats {
+  product: Product!
+  totalEntrees: Float!
+  totalSorties: Float!
+  nombreMouvements: Int!
 }
 
 # ============ INPUTS ============
@@ -363,6 +552,12 @@ input ChangePasswordInput {
   newPassword: String!
 }
 
+input ExchangeRateInput {
+  fromCurrency: String!
+  toCurrency: String!
+  rate: Float!
+}
+
 input UpdateCompanyInput {
   name: String
   address: String
@@ -395,33 +590,38 @@ input UpdateStoreInput {
 input CreateProductInput {
   name: String!
   mark: String!
-  priceVente: Float!
-  priceAchat: Float!
-  stock: Float!
-  currency: String # Optional: si non fourni, utilise la currency par défaut de la boutique
   storeId: String! # Store auquel appartient le produit
-  providerId: String # ID du fournisseur (optionnel)
 }
 
 input UpdateProductInput {
   name: String
   mark: String
-  priceVente: Float
-  priceAchat: Float
-  stock: Float
-  currency: String # Currency du produit
-  providerId: String # ID du fournisseur (optionnel, peut être null pour retirer le fournisseur)
+}
+
+input StockSupplyInput {
+  productId: String! # ID du produit template
+  quantity: Float!
+  priceAchat: Float!
+  priceVente: Float!
+  currency: String # Optional: si non fourni, utilise la currency par défaut de la boutique
+  storeId: String!
+  providerId: String! # ID du fournisseur (obligatoire)
+  paymentType: String! # "cash" ou "debt"
+  amountPaid: Float # Montant payé (obligatoire si paymentType = "debt", optionnel si "cash")
+  date: String # Optional, defaults to now
 }
 
 input CreateClientInput {
   name: String!
   phone: String!
   storeId: String! # Store auquel appartient le client
+  creditLimit: Float # Limite de crédit autorisée (optionnel, défaut: 0)
 }
 
 input UpdateClientInput {
   name: String
   phone: String
+  creditLimit: Float # Modifier la limite de crédit
 }
 
 input CreateProviderInput {
@@ -480,7 +680,7 @@ input CreateCaisseTransactionInput {
 }
 
 input SaleProductInput {
-  productId: String!
+  productInStockId: String! # ID du produit en stock (ProductInStock)
   quantity: Float!
   price: Float!
 }
@@ -521,17 +721,37 @@ type Query {
   # Company
   company: Company! @auth
   
+  # Exchange Rates
+  exchangeRates: [ExchangeRate!]! @auth # Récupère les taux de change de l'entreprise
+  convertCurrency(amount: Float!, fromCurrency: String!, toCurrency: String!): Float! @auth # Convertit un montant d'une devise à une autre
+  
   # Subscription
   subscription: CompanySubscription! @auth
   checkSubscriptionStatus: SubscriptionStatus! @auth
+  
+  # Subscription Plans
+  subscriptionPlans: [SubscriptionPlan!]! # Public query, no auth required
+  subscriptionPlan(id: ID!): SubscriptionPlan # Public query, no auth required
   
   # Stores
   stores: [Store!]! @auth
   store(id: ID!): Store @auth
   
-  # Products
+  # Products (templates)
   products(storeId: String): [Product!]! @auth # Si storeId non fourni, retourne les produits des stores accessibles
   product(id: ID!): Product @auth
+  
+  # Products in Stock
+  productsInStock(storeId: String, productId: String, providerId: String): [ProductInStock!]! @auth # Liste des produits en stock. Filtres optionnels
+  productInStock(id: ID!): ProductInStock @auth
+  
+  # Stock Supplies
+  stockSupplies(storeId: String, productId: String, providerId: String): [StockSupply!]! @auth # Historique des approvisionnements
+  stockSupply(id: ID!): StockSupply @auth
+  
+  # Provider Debts
+  providerDebts(storeId: String, providerId: String, status: String): [ProviderDebt!]! @auth # Liste des dettes envers les fournisseurs
+  providerDebt(id: ID!): ProviderDebt @auth
   
   # Clients
   clients(storeId: String): [Client!]! @auth # Si storeId non fourni, retourne les clients des stores accessibles
@@ -599,6 +819,37 @@ type Query {
   inventories(storeId: String, status: String): [Inventory!]! @auth # Liste des inventaires (optionnel: filtrer par store et status)
   inventory(id: ID!): Inventory @auth # Détails d'un inventaire
   activeInventory(storeId: String!): Inventory @auth # Inventaire actif pour un store (draft ou in_progress)
+  
+  # Stock Reports
+  stockReport(
+    storeId: String
+    productId: String
+    currency: String
+    period: String # "day", "week", "month", "year", "custom"
+    startDate: String
+    endDate: String
+    type: StockMovementType # Filtrer par type de mouvement
+  ): StockReport! @auth # Récupérer le rapport de stock
+  
+  # Récupérer l'historique des mouvements de stock
+  stockMovements(
+    storeId: String
+    productId: String
+    type: StockMovementType
+    startDate: String
+    endDate: String
+    limit: Int
+    offset: Int
+  ): [StockMovement!]! @auth
+  
+  # Statistiques de stock
+  stockStats(
+    storeId: String
+    productId: String
+    period: String
+    startDate: String
+    endDate: String
+  ): StockStats! @auth
 }
 
 # ============ MUTATIONS ============
@@ -622,21 +873,28 @@ type Mutation {
   createCompany(input: CreateCompanyInput!): Company! @auth
   updateCompany(input: UpdateCompanyInput!): Company! @auth
   deleteCompany: Boolean! @auth
+  
+  # Exchange Rates
+  updateExchangeRates(rates: [ExchangeRateInput!]!): Company! @auth # Met à jour les taux de change de l'entreprise
 
   # Stores
   createStore(input: CreateStoreInput!): Store! @auth
   updateStore(id: ID!, input: UpdateStoreInput!): Store! @auth
   deleteStore(id: ID!): Boolean! @auth
 
-  # Products
+  # Products (templates)
   createProduct(input: CreateProductInput!): Product! @auth
   updateProduct(id: ID!, input: UpdateProductInput!): Product! @auth
   deleteProduct(id: ID!): Boolean! @auth
+  
+  # Stock Supply (Approvisionnement)
+  supplyStock(input: StockSupplyInput!): StockSupply! @auth # Approvisionner un produit en stock
 
   # Clients
   createClient(input: CreateClientInput!): Client! @auth
   updateClient(id: ID!, input: UpdateClientInput!): Client! @auth
   deleteClient(id: ID!): Boolean! @auth
+  updateClientCreditLimit(clientId: ID!, creditLimit: Float!): Client! @auth # Modifier la limite de crédit d'un client
 
   # Providers
   createProvider(input: CreateProviderInput!): Provider! @auth
@@ -663,6 +921,9 @@ type Mutation {
   
   # Debts
   payDebt(debtId: ID!, amount: Float!, description: String!): Debt! @auth # Payer une dette (partiellement ou totalement)
+  
+  # Provider Debts
+  payProviderDebt(providerDebtId: ID!, amount: Float!, description: String!): ProviderDebt! @auth # Payer une dette envers un fournisseur
   
   # Inventories
   createInventory(input: CreateInventoryInput!): Inventory! @auth # Créer une nouvelle session d'inventaire

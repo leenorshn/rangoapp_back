@@ -10,19 +10,20 @@ import (
 )
 
 type Company struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name        string             `bson:"name" json:"name"`
-	Address     string             `bson:"address" json:"address"`
-	Phone       string             `bson:"phone" json:"phone"`
-	Email       *string            `bson:"email,omitempty" json:"email,omitempty"`
-	Description string             `bson:"description" json:"description"`
-	Type        string             `bson:"type" json:"type"`
-	Logo        *string            `bson:"logo,omitempty" json:"logo,omitempty"`
-	Rccm        *string            `bson:"rccm,omitempty" json:"rccm,omitempty"`
-	IDNat       *string            `bson:"idNat,omitempty" json:"idNat,omitempty"`
-	IDCommerce  *string            `bson:"idCommerce,omitempty" json:"idCommerce,omitempty"`
-	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
-	UpdatedAt   time.Time          `bson:"updatedAt" json:"updatedAt"`
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name          string             `bson:"name" json:"name"`
+	Address       string             `bson:"address" json:"address"`
+	Phone         string             `bson:"phone" json:"phone"`
+	Email         *string            `bson:"email,omitempty" json:"email,omitempty"`
+	Description   string             `bson:"description" json:"description"`
+	Type          string             `bson:"type" json:"type"`
+	Logo          *string            `bson:"logo,omitempty" json:"logo,omitempty"`
+	Rccm          *string            `bson:"rccm,omitempty" json:"rccm,omitempty"`
+	IDNat         *string            `bson:"idNat,omitempty" json:"idNat,omitempty"`
+	IDCommerce    *string            `bson:"idCommerce,omitempty" json:"idCommerce,omitempty"`
+	ExchangeRates []ExchangeRate     `bson:"exchangeRates" json:"exchangeRates"` // Taux de change configurés
+	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt     time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
 
 func (db *DB) CreateCompany(name, address, phone, description, companyType string, email, logo, rccm, idNat, idCommerce *string) (*Company, error) {
@@ -40,19 +41,20 @@ func (db *DB) CreateCompany(name, address, phone, description, companyType strin
 	}
 
 	company := Company{
-		ID:          primitive.NewObjectID(),
-		Name:        name,
-		Address:     address,
-		Phone:       phone,
-		Email:       email,
-		Description: description,
-		Type:        companyType,
-		Logo:        logo,
-		Rccm:        rccm,
-		IDNat:       idNat,
-		IDCommerce:  idCommerce,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:            primitive.NewObjectID(),
+		Name:          name,
+		Address:       address,
+		Phone:         phone,
+		Email:         email,
+		Description:   description,
+		Type:          companyType,
+		Logo:          logo,
+		Rccm:          rccm,
+		IDNat:         idNat,
+		IDCommerce:    idCommerce,
+		ExchangeRates: InitializeCompanyExchangeRates(), // Initialiser avec les taux par défaut
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 
 	_, err = companyCollection.InsertOne(ctx, company)

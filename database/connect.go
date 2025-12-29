@@ -265,9 +265,9 @@ func createIndexes(db *DB) {
 		},
 		{
 			// Compound index for storeId + name (for search queries)
-			Keys: bson.M{
-				"storeId": 1,
-				"name":    1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "name", Value: 1},
 			},
 		},
 	}
@@ -305,21 +305,21 @@ func createIndexes(db *DB) {
 	factureIndexes := []mongo.IndexModel{
 		{
 			// Compound unique index on storeId and factureNumber
-			Keys: bson.M{
-				"storeId":       1,
-				"factureNumber": 1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "factureNumber", Value: 1},
 			},
 			Options: options.Index().SetUnique(true),
 		},
 		{
 			// Simple index on storeId
-			Keys: bson.M{"storeId": 1},
+			Keys: bson.D{{Key: "storeId", Value: 1}},
 		},
 		{
 			// Compound index for storeId + createdAt (for period filters)
-			Keys: bson.M{
-				"storeId":   1,
-				"createdAt": -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "createdAt", Value: -1},
 			},
 		},
 	}
@@ -360,17 +360,17 @@ func createIndexes(db *DB) {
 		},
 		{
 			// Compound index for common queries: storeId + currency + date
-			Keys: bson.M{
-				"storeId":  1,
-				"currency": 1,
-				"date":     -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "currency", Value: 1},
+				{Key: "date", Value: -1},
 			},
 		},
 		{
 			// Compound index for storeId + createdAt
-			Keys: bson.M{
-				"storeId":   1,
-				"createdAt": -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "createdAt", Value: -1},
 			},
 		},
 	}
@@ -396,24 +396,24 @@ func createIndexes(db *DB) {
 		},
 		{
 			// Compound index for common queries: storeId + createdAt (for period filters)
-			Keys: bson.M{
-				"storeId":   1,
-				"createdAt": -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "createdAt", Value: -1},
 			},
 		},
 		{
 			// Compound index for storeId + currency + createdAt
-			Keys: bson.M{
-				"storeId":   1,
-				"currency":  1,
-				"createdAt": -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "currency", Value: 1},
+				{Key: "createdAt", Value: -1},
 			},
 		},
 		{
 			// Compound index for storeId + date (for date-based queries)
-			Keys: bson.M{
-				"storeId": 1,
-				"date":    -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "date", Value: -1},
 			},
 		},
 		{
@@ -462,17 +462,17 @@ func createIndexes(db *DB) {
 		},
 		{
 			// Compound index for storeId + status + createdAt
-			Keys: bson.M{
-				"storeId":   1,
-				"status":    1,
-				"createdAt": -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "createdAt", Value: -1},
 			},
 		},
 		{
 			// Compound index for clientId + storeId
-			Keys: bson.M{
-				"clientId": 1,
-				"storeId":  1,
+			Keys: bson.D{
+				{Key: "clientId", Value: 1},
+				{Key: "storeId", Value: 1},
 			},
 		},
 	}
@@ -495,10 +495,10 @@ func createIndexes(db *DB) {
 		},
 		{
 			// Compound index for storeId + status + createdAt
-			Keys: bson.M{
-				"storeId":   1,
-				"status":    1,
-				"createdAt": -1,
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "createdAt", Value: -1},
 			},
 		},
 	}
@@ -507,5 +507,94 @@ func createIndexes(db *DB) {
 		utils.LogError(err, "Failed to create inventory indexes")
 	}
 
+	// Stock movements indexes
+	stockMovementCollection := colHelper(db, "stock_movements")
+	stockMovementIndexes := []mongo.IndexModel{
+		{
+			Keys: map[string]interface{}{"productId": 1},
+		},
+		{
+			Keys: map[string]interface{}{"storeId": 1},
+		},
+		{
+			Keys: map[string]interface{}{"type": 1},
+		},
+		{
+			Keys: map[string]interface{}{"createdAt": -1},
+		},
+		{
+			Keys: map[string]interface{}{"currency": 1},
+		},
+		{
+			// Compound index for productId + storeId (common query pattern)
+			Keys: bson.D{
+				{Key: "productId", Value: 1},
+				{Key: "storeId", Value: 1},
+			},
+		},
+		{
+			// Compound index for storeId + createdAt (for period filters)
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "createdAt", Value: -1},
+			},
+		},
+		{
+			// Compound index for storeId + type + createdAt
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "type", Value: 1},
+				{Key: "createdAt", Value: -1},
+			},
+		},
+		{
+			// Index for reference lookups
+			Keys: bson.D{
+				{Key: "referenceType", Value: 1},
+				{Key: "referenceId", Value: 1},
+			},
+		},
+		{
+			Keys: map[string]interface{}{"operatorId": 1},
+		},
+	}
+	_, err = stockMovementCollection.Indexes().CreateMany(ctx, stockMovementIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create stock movement indexes")
+	}
+
+	// Subscription plans indexes
+	subscriptionPlanCollection := colHelper(db, "subscription_plans")
+	subscriptionPlanIndexes := []mongo.IndexModel{
+		{
+			Keys:    map[string]interface{}{"planId": 1},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys: map[string]interface{}{"isActive": 1},
+		},
+		{
+			Keys: map[string]interface{}{"price": 1},
+		},
+	}
+	_, err = subscriptionPlanCollection.Indexes().CreateMany(ctx, subscriptionPlanIndexes)
+	if err != nil {
+		utils.LogError(err, "Failed to create subscription plan indexes")
+	}
+
+	// Exchange rate history indexes
+	if err := db.CreateExchangeRateHistoryIndexes(); err != nil {
+		utils.LogError(err, "Failed to create exchange rate history indexes")
+		// Don't fail the entire startup, but log the error
+	}
+
 	utils.Info("MongoDB indexes created successfully")
+
+	// Initialize subscription plans
+	if err := db.InitializeSubscriptionPlans(); err != nil {
+		utils.LogError(err, "Failed to initialize subscription plans")
+		// Don't fail the entire startup, but log the error
+	} else {
+		utils.Info("Subscription plans initialized successfully")
+	}
 }

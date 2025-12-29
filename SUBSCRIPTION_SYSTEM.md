@@ -19,7 +19,7 @@ Le modèle `Subscription` est défini dans `database/subscription_db.go` avec le
 
 Les limites par plan sont définies dans `PlanLimits` :
 
-- **Trial** : 14 jours, 1 store, 1 utilisateur
+- **Trial** : 14 jours, 1 store, 2 utilisateurs
 - **Starter** : 1 store, 1 utilisateur
 - **Business** : 3 stores, 5 utilisateurs
 - **Enterprise** : Illimité
@@ -192,6 +192,23 @@ Les logs suivants sont générés :
 3. **Mode Read-Only** : Implémenter un mode lecture seule pendant 7 jours après expiration
 4. **Tableau de Bord** : Créer une interface pour gérer les abonnements
 5. **Métriques** : Ajouter des métriques sur les conversions d'essai vers abonnement
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

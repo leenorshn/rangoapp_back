@@ -15,10 +15,10 @@ import (
 
 // InventoryStatus represents the status of an inventory
 const (
-	InventoryStatusDraft     = "draft"     // En cours de préparation
+	InventoryStatusDraft      = "draft"       // En cours de préparation
 	InventoryStatusInProgress = "in_progress" // En cours de comptage
-	InventoryStatusCompleted = "completed" // Terminé
-	InventoryStatusCancelled = "cancelled" // Annulé
+	InventoryStatusCompleted  = "completed"   // Terminé
+	InventoryStatusCancelled  = "cancelled"   // Annulé
 )
 
 // Inventory represents an inventory session
@@ -30,7 +30,7 @@ type Inventory struct {
 	StartDate   time.Time          `bson:"startDate" json:"startDate"`
 	EndDate     *time.Time         `bson:"endDate,omitempty" json:"endDate,omitempty"`
 	Description string             `bson:"description" json:"description"`
-	Items       []InventoryItem    `bson:"items" json:"items"` // Liste des produits inventoriés
+	Items       []InventoryItem    `bson:"items" json:"items"`           // Liste des produits inventoriés
 	TotalItems  int                `bson:"totalItems" json:"totalItems"` // Nombre total de produits différents
 	TotalValue  float64            `bson:"totalValue" json:"totalValue"` // Valeur totale de l'inventaire
 	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
@@ -40,15 +40,15 @@ type Inventory struct {
 // InventoryItem represents a product counted during inventory
 type InventoryItem struct {
 	ProductID        primitive.ObjectID `bson:"productId" json:"productId"`
-	ProductName      string             `bson:"productName" json:"productName"` // Nom du produit au moment de l'inventaire
-	SystemQuantity   float64            `bson:"systemQuantity" json:"systemQuantity"` // Quantité dans le système
+	ProductName      string             `bson:"productName" json:"productName"`           // Nom du produit au moment de l'inventaire
+	SystemQuantity   float64            `bson:"systemQuantity" json:"systemQuantity"`     // Quantité dans le système
 	PhysicalQuantity float64            `bson:"physicalQuantity" json:"physicalQuantity"` // Quantité physique comptée
-	Difference       float64            `bson:"difference" json:"difference"` // Différence (physical - system)
-	UnitPrice        float64            `bson:"unitPrice" json:"unitPrice"` // Prix unitaire au moment de l'inventaire
-	TotalValue       float64            `bson:"totalValue" json:"totalValue"` // Valeur totale (physicalQuantity * unitPrice)
+	Difference       float64            `bson:"difference" json:"difference"`             // Différence (physical - system)
+	UnitPrice        float64            `bson:"unitPrice" json:"unitPrice"`               // Prix unitaire au moment de l'inventaire
+	TotalValue       float64            `bson:"totalValue" json:"totalValue"`             // Valeur totale (physicalQuantity * unitPrice)
 	Reason           string             `bson:"reason,omitempty" json:"reason,omitempty"` // Raison de l'écart (vol, casse, erreur, etc.)
-	CountedBy        primitive.ObjectID `bson:"countedBy" json:"countedBy"` // Personne qui a compté
-	CountedAt        time.Time         `bson:"countedAt" json:"countedAt"`
+	CountedBy        primitive.ObjectID `bson:"countedBy" json:"countedBy"`               // Personne qui a compté
+	CountedAt        time.Time          `bson:"countedAt" json:"countedAt"`
 }
 
 // CreateInventory creates a new inventory session
@@ -126,14 +126,33 @@ func (db *DB) AddInventoryItem(inventoryID string, productID primitive.ObjectID,
 		return nil, gqlerror.Errorf("Product does not belong to the inventory's store")
 	}
 
+	// Get products in stock for this product and store
+	productsInStock, err := db.FindProductsInStockByProductID(productID.Hex(), []primitive.ObjectID{inventory.StoreID})
+	if err != nil {
+		return nil, gqlerror.Errorf("Error finding products in stock: %v", err)
+	}
+
+	if len(productsInStock) == 0 {
+		return nil, gqlerror.Errorf("No stock found for this product in this store")
+	}
+
+	// Calculate total system quantity (sum of all stock entries)
+	var systemQuantity float64
+	var unitPrice float64
+	for _, pis := range productsInStock {
+		systemQuantity += pis.Stock
+		// Use the first product in stock's price (or we could use the default currency)
+		if unitPrice == 0 {
+			unitPrice = pis.PriceVente
+		}
+	}
+
 	// Validate physical quantity
 	if physicalQuantity < 0 {
 		return nil, gqlerror.Errorf("Physical quantity cannot be negative")
 	}
 
-	systemQuantity := product.Stock
 	difference := physicalQuantity - systemQuantity
-	unitPrice := product.PriceVente
 	totalValue := physicalQuantity * unitPrice
 
 	now := time.Now()
@@ -232,22 +251,55 @@ func (db *DB) CompleteInventory(inventoryID string, adjustStock bool) (*Inventor
 					continue
 				}
 
-				// Create stock movement record
-				operation := "entree"
+				// Create stock movement record (new format)
+				movementType := StockMovementTypeAjustement
+				adjustmentQuantityAbs := adjustmentQuantity
 				if adjustmentQuantity < 0 {
-					operation = "sortie"
-					adjustmentQuantity = -adjustmentQuantity // Make it positive for the movement
+					adjustmentQuantityAbs = -adjustmentQuantity // Make it positive for the movement
 				}
 
-				_, err = db.CreateMouvementStock(
+				// Get store to get default currency
+				store, err := db.FindStoreByID(inventory.StoreID.Hex())
+				productCurrency := "USD" // Default currency
+				if err == nil && store != nil {
+					productCurrency = store.DefaultCurrency
+					if productCurrency == "" {
+						productCurrency = "USD"
+					}
+				}
+
+				_, err = db.CreateStockMovement(
 					item.ProductID.Hex(),
 					inventory.StoreID.Hex(),
-					adjustmentQuantity,
-					operation,
+					movementType,
+					adjustmentQuantityAbs,
+					item.UnitPrice,
+					productCurrency,
+					inventory.OperatorID,
+					item.Reason,
+					fmt.Sprintf("inventory-%s", inventory.ID.Hex()),
+					"INVENTORY",
+					&inventory.ID,
 				)
 				if err != nil {
 					// Log error but continue
 					utils.LogError(err, fmt.Sprintf("Error creating stock movement for product %s", item.ProductID.Hex()))
+				}
+
+				// Also create old format movement for backward compatibility
+				operation := "entree"
+				if adjustmentQuantity < 0 {
+					operation = "sortie"
+				}
+				_, err = db.CreateMouvementStock(
+					item.ProductID.Hex(),
+					inventory.StoreID.Hex(),
+					adjustmentQuantityAbs,
+					operation,
+				)
+				if err != nil {
+					// Log error but continue
+					utils.LogError(err, fmt.Sprintf("Error creating old format stock movement for product %s", item.ProductID.Hex()))
 				}
 
 				// Create rapport store entry
@@ -404,7 +456,7 @@ func (db *DB) GetActiveInventory(storeID string) (*Inventory, error) {
 	// Find active inventory (draft or in_progress)
 	filter := bson.M{
 		"storeId": storeObjectID,
-		"status": bson.M{"$in": []string{InventoryStatusDraft, InventoryStatusInProgress}},
+		"status":  bson.M{"$in": []string{InventoryStatusDraft, InventoryStatusInProgress}},
 	}
 
 	var inventory Inventory

@@ -2,6 +2,12 @@
 
 package model
 
+import (
+	"fmt"
+	"io"
+	"strconv"
+)
+
 type AddInventoryItemInput struct {
 	InventoryID      string  `json:"inventoryId"`
 	ProductID        string  `json:"productId"`
@@ -70,31 +76,35 @@ type ChangePasswordInput struct {
 }
 
 type Client struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Phone     string `json:"phone"`
-	StoreID   string `json:"storeId"`
-	Store     *Store `json:"store"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Phone           string  `json:"phone"`
+	StoreID         string  `json:"storeId"`
+	Store           *Store  `json:"store"`
+	CreditLimit     float64 `json:"creditLimit"`
+	CurrentDebt     float64 `json:"currentDebt"`
+	AvailableCredit float64 `json:"availableCredit"`
+	CreatedAt       string  `json:"createdAt"`
+	UpdatedAt       string  `json:"updatedAt"`
 }
 
 type Company struct {
-	ID           string               `json:"id"`
-	Name         string               `json:"name"`
-	Address      string               `json:"address"`
-	Phone        string               `json:"phone"`
-	Email        *string              `json:"email,omitempty"`
-	Description  string               `json:"description"`
-	Type         string               `json:"type"`
-	Logo         *string              `json:"logo,omitempty"`
-	Rccm         *string              `json:"rccm,omitempty"`
-	IDNat        *string              `json:"idNat,omitempty"`
-	IDCommerce   *string              `json:"idCommerce,omitempty"`
-	Stores       []*Store             `json:"stores"`
-	Subscription *CompanySubscription `json:"subscription"`
-	CreatedAt    string               `json:"createdAt"`
-	UpdatedAt    string               `json:"updatedAt"`
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Address       string               `json:"address"`
+	Phone         string               `json:"phone"`
+	Email         *string              `json:"email,omitempty"`
+	Description   string               `json:"description"`
+	Type          string               `json:"type"`
+	Logo          *string              `json:"logo,omitempty"`
+	Rccm          *string              `json:"rccm,omitempty"`
+	IDNat         *string              `json:"idNat,omitempty"`
+	IDCommerce    *string              `json:"idCommerce,omitempty"`
+	Stores        []*Store             `json:"stores"`
+	Subscription  *CompanySubscription `json:"subscription"`
+	ExchangeRates []*ExchangeRate      `json:"exchangeRates"`
+	CreatedAt     string               `json:"createdAt"`
+	UpdatedAt     string               `json:"updatedAt"`
 }
 
 type CompanySubscription struct {
@@ -126,9 +136,10 @@ type CreateCaisseTransactionInput struct {
 }
 
 type CreateClientInput struct {
-	Name    string `json:"name"`
-	Phone   string `json:"phone"`
-	StoreID string `json:"storeId"`
+	Name        string   `json:"name"`
+	Phone       string   `json:"phone"`
+	StoreID     string   `json:"storeId"`
+	CreditLimit *float64 `json:"creditLimit,omitempty"`
 }
 
 type CreateCompanyInput struct {
@@ -160,14 +171,9 @@ type CreateInventoryInput struct {
 }
 
 type CreateProductInput struct {
-	Name       string  `json:"name"`
-	Mark       string  `json:"mark"`
-	PriceVente float64 `json:"priceVente"`
-	PriceAchat float64 `json:"priceAchat"`
-	Stock      float64 `json:"stock"`
-	Currency   *string `json:"currency,omitempty"`
-	StoreID    string  `json:"storeId"`
-	ProviderID *string `json:"providerId,omitempty"`
+	Name    string `json:"name"`
+	Mark    string `json:"mark"`
+	StoreID string `json:"storeId"`
 }
 
 type CreateProviderInput struct {
@@ -246,6 +252,21 @@ type DebtPayment struct {
 	CreatedAt   string  `json:"createdAt"`
 }
 
+type ExchangeRate struct {
+	FromCurrency string  `json:"fromCurrency"`
+	ToCurrency   string  `json:"toCurrency"`
+	Rate         float64 `json:"rate"`
+	IsDefault    bool    `json:"isDefault"`
+	UpdatedAt    string  `json:"updatedAt"`
+	UpdatedBy    string  `json:"updatedBy"`
+}
+
+type ExchangeRateInput struct {
+	FromCurrency string  `json:"fromCurrency"`
+	ToCurrency   string  `json:"toCurrency"`
+	Rate         float64 `json:"rate"`
+}
+
 type Facture struct {
 	ID            string            `json:"id"`
 	FactureNumber string            `json:"factureNumber"`
@@ -310,19 +331,36 @@ type Mutation struct {
 }
 
 type Product struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Mark      string `json:"mark"`
+	StoreID   string `json:"storeId"`
+	Store     *Store `json:"store"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type ProductInStock struct {
 	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Mark       string    `json:"mark"`
+	ProductID  string    `json:"productId"`
+	Product    *Product  `json:"product"`
 	PriceVente float64   `json:"priceVente"`
 	PriceAchat float64   `json:"priceAchat"`
 	Currency   string    `json:"currency"`
 	Stock      float64   `json:"stock"`
 	StoreID    string    `json:"storeId"`
 	Store      *Store    `json:"store"`
-	ProviderID *string   `json:"providerId,omitempty"`
-	Provider   *Provider `json:"provider,omitempty"`
+	ProviderID string    `json:"providerId"`
+	Provider   *Provider `json:"provider"`
 	CreatedAt  string    `json:"createdAt"`
 	UpdatedAt  string    `json:"updatedAt"`
+}
+
+type ProductMovementStats struct {
+	Product          *Product `json:"product"`
+	TotalEntrees     float64  `json:"totalEntrees"`
+	TotalSorties     float64  `json:"totalSorties"`
+	NombreMouvements int      `json:"nombreMouvements"`
 }
 
 type Provider struct {
@@ -334,6 +372,39 @@ type Provider struct {
 	Store     *Store `json:"store"`
 	CreatedAt string `json:"createdAt"`
 	UpdatedAt string `json:"updatedAt"`
+}
+
+type ProviderDebt struct {
+	ID          string                 `json:"id"`
+	SupplyID    string                 `json:"supplyId"`
+	Supply      *StockSupply           `json:"supply"`
+	ProviderID  string                 `json:"providerId"`
+	Provider    *Provider              `json:"provider"`
+	StoreID     string                 `json:"storeId"`
+	Store       *Store                 `json:"store"`
+	TotalAmount float64                `json:"totalAmount"`
+	AmountPaid  float64                `json:"amountPaid"`
+	AmountDue   float64                `json:"amountDue"`
+	Currency    string                 `json:"currency"`
+	Status      string                 `json:"status"`
+	Payments    []*ProviderDebtPayment `json:"payments"`
+	CreatedAt   string                 `json:"createdAt"`
+	UpdatedAt   string                 `json:"updatedAt"`
+	PaidAt      *string                `json:"paidAt,omitempty"`
+}
+
+type ProviderDebtPayment struct {
+	ID             string        `json:"id"`
+	ProviderDebtID string        `json:"providerDebtId"`
+	ProviderDebt   *ProviderDebt `json:"providerDebt"`
+	Amount         float64       `json:"amount"`
+	Currency       string        `json:"currency"`
+	OperatorID     string        `json:"operatorId"`
+	Operator       *User         `json:"operator"`
+	StoreID        string        `json:"storeId"`
+	Store          *Store        `json:"store"`
+	Description    string        `json:"description"`
+	CreatedAt      string        `json:"createdAt"`
 }
 
 type Query struct {
@@ -397,16 +468,16 @@ type SaleList struct {
 }
 
 type SaleProduct struct {
-	ProductID string   `json:"productId"`
-	Product   *Product `json:"product"`
-	Quantity  float64  `json:"quantity"`
-	Price     float64  `json:"price"`
+	ProductInStockID string          `json:"productInStockId"`
+	ProductInStock   *ProductInStock `json:"productInStock"`
+	Quantity         float64         `json:"quantity"`
+	Price            float64         `json:"price"`
 }
 
 type SaleProductInput struct {
-	ProductID string  `json:"productId"`
-	Quantity  float64 `json:"quantity"`
-	Price     float64 `json:"price"`
+	ProductInStockID string  `json:"productInStockId"`
+	Quantity         float64 `json:"quantity"`
+	Price            float64 `json:"price"`
 }
 
 type SalesStats struct {
@@ -415,6 +486,116 @@ type SalesStats struct {
 	TotalItems    float64 `json:"totalItems"`
 	AverageSale   float64 `json:"averageSale"`
 	TotalBenefice float64 `json:"totalBenefice"`
+}
+
+type StockMovement struct {
+	ID            string            `json:"id"`
+	ProductID     string            `json:"productId"`
+	Product       *Product          `json:"product"`
+	StoreID       string            `json:"storeId"`
+	Store         *Store            `json:"store"`
+	Type          StockMovementType `json:"type"`
+	Quantity      float64           `json:"quantity"`
+	UnitPrice     float64           `json:"unitPrice"`
+	TotalValue    float64           `json:"totalValue"`
+	Currency      string            `json:"currency"`
+	Reason        *string           `json:"reason,omitempty"`
+	Reference     *string           `json:"reference,omitempty"`
+	ReferenceType *string           `json:"referenceType,omitempty"`
+	ReferenceID   *string           `json:"referenceId,omitempty"`
+	OperatorID    string            `json:"operatorId"`
+	Operator      *User             `json:"operator"`
+	CreatedAt     string            `json:"createdAt"`
+	UpdatedAt     string            `json:"updatedAt"`
+}
+
+type StockMovementByProduct struct {
+	ProductID           string   `json:"productId"`
+	Product             *Product `json:"product"`
+	TotalEntrees        float64  `json:"totalEntrees"`
+	TotalSorties        float64  `json:"totalSorties"`
+	TotalAjustements    float64  `json:"totalAjustements"`
+	SoldeInitial        float64  `json:"soldeInitial"`
+	SoldeFinal          float64  `json:"soldeFinal"`
+	NombreMouvements    int      `json:"nombreMouvements"`
+	ValeurTotaleEntrees float64  `json:"valeurTotaleEntrees"`
+	ValeurTotaleSorties float64  `json:"valeurTotaleSorties"`
+}
+
+type StockReport struct {
+	StoreID              string                    `json:"storeId"`
+	Store                *Store                    `json:"store"`
+	Currency             string                    `json:"currency"`
+	Period               string                    `json:"period"`
+	StartDate            string                    `json:"startDate"`
+	EndDate              string                    `json:"endDate"`
+	TotalEntrees         float64                   `json:"totalEntrees"`
+	TotalSorties         float64                   `json:"totalSorties"`
+	TotalAjustements     float64                   `json:"totalAjustements"`
+	SoldeInitial         float64                   `json:"soldeInitial"`
+	SoldeFinal           float64                   `json:"soldeFinal"`
+	NombreMouvements     int                       `json:"nombreMouvements"`
+	MouvementsParProduit []*StockMovementByProduct `json:"mouvementsParProduit"`
+	ResumeParJour        []*StockReportResumeJour  `json:"resumeParJour"`
+	Mouvements           []*StockMovement          `json:"mouvements"`
+}
+
+type StockReportResumeJour struct {
+	Date                string  `json:"date"`
+	Entrees             float64 `json:"entrees"`
+	Sorties             float64 `json:"sorties"`
+	Ajustements         float64 `json:"ajustements"`
+	Solde               float64 `json:"solde"`
+	NombreMouvements    int     `json:"nombreMouvements"`
+	ValeurTotaleEntrees float64 `json:"valeurTotaleEntrees"`
+	ValeurTotaleSorties float64 `json:"valeurTotaleSorties"`
+}
+
+type StockStats struct {
+	TotalProducts          int                     `json:"totalProducts"`
+	TotalValue             float64                 `json:"totalValue"`
+	ProductsLowStock       int                     `json:"productsLowStock"`
+	ProductsOutOfStock     int                     `json:"productsOutOfStock"`
+	TotalEntrees           float64                 `json:"totalEntrees"`
+	TotalSorties           float64                 `json:"totalSorties"`
+	TopProductsByMovements []*ProductMovementStats `json:"topProductsByMovements"`
+}
+
+type StockSupply struct {
+	ID               string          `json:"id"`
+	ProductID        string          `json:"productId"`
+	Product          *Product        `json:"product"`
+	ProductInStockID string          `json:"productInStockId"`
+	ProductInStock   *ProductInStock `json:"productInStock"`
+	Quantity         float64         `json:"quantity"`
+	PriceAchat       float64         `json:"priceAchat"`
+	PriceVente       float64         `json:"priceVente"`
+	Currency         string          `json:"currency"`
+	ProviderID       string          `json:"providerId"`
+	Provider         *Provider       `json:"provider"`
+	StoreID          string          `json:"storeId"`
+	Store            *Store          `json:"store"`
+	OperatorID       string          `json:"operatorId"`
+	Operator         *User           `json:"operator"`
+	PaymentType      string          `json:"paymentType"`
+	ProviderDebtID   *string         `json:"providerDebtId,omitempty"`
+	ProviderDebt     *ProviderDebt   `json:"providerDebt,omitempty"`
+	Date             string          `json:"date"`
+	CreatedAt        string          `json:"createdAt"`
+	UpdatedAt        string          `json:"updatedAt"`
+}
+
+type StockSupplyInput struct {
+	ProductID   string   `json:"productId"`
+	Quantity    float64  `json:"quantity"`
+	PriceAchat  float64  `json:"priceAchat"`
+	PriceVente  float64  `json:"priceVente"`
+	Currency    *string  `json:"currency,omitempty"`
+	StoreID     string   `json:"storeId"`
+	ProviderID  string   `json:"providerId"`
+	PaymentType string   `json:"paymentType"`
+	AmountPaid  *float64 `json:"amountPaid,omitempty"`
+	Date        *string  `json:"date,omitempty"`
 }
 
 type Store struct {
@@ -430,6 +611,21 @@ type Store struct {
 	UpdatedAt           string   `json:"updatedAt"`
 }
 
+type SubscriptionPlan struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Price         float64  `json:"price"`
+	Currency      string   `json:"currency"`
+	BillingPeriod string   `json:"billingPeriod"`
+	Description   string   `json:"description"`
+	Features      []string `json:"features"`
+	MaxStores     *int     `json:"maxStores,omitempty"`
+	MaxUsers      *int     `json:"maxUsers,omitempty"`
+	IsActive      bool     `json:"isActive"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
+}
+
 type SubscriptionStatus struct {
 	IsValid      bool                 `json:"isValid"`
 	Message      *string              `json:"message,omitempty"`
@@ -437,8 +633,9 @@ type SubscriptionStatus struct {
 }
 
 type UpdateClientInput struct {
-	Name  *string `json:"name,omitempty"`
-	Phone *string `json:"phone,omitempty"`
+	Name        *string  `json:"name,omitempty"`
+	Phone       *string  `json:"phone,omitempty"`
+	CreditLimit *float64 `json:"creditLimit,omitempty"`
 }
 
 type UpdateCompanyInput struct {
@@ -464,13 +661,8 @@ type UpdateFactureInput struct {
 }
 
 type UpdateProductInput struct {
-	Name       *string  `json:"name,omitempty"`
-	Mark       *string  `json:"mark,omitempty"`
-	PriceVente *float64 `json:"priceVente,omitempty"`
-	PriceAchat *float64 `json:"priceAchat,omitempty"`
-	Stock      *float64 `json:"stock,omitempty"`
-	Currency   *string  `json:"currency,omitempty"`
-	ProviderID *string  `json:"providerId,omitempty"`
+	Name *string `json:"name,omitempty"`
+	Mark *string `json:"mark,omitempty"`
 }
 
 type UpdateProviderInput struct {
@@ -506,4 +698,47 @@ type User struct {
 	AssignedStoreID *string  `json:"assignedStoreId,omitempty"`
 	CreatedAt       string   `json:"createdAt"`
 	UpdatedAt       string   `json:"updatedAt"`
+}
+
+type StockMovementType string
+
+const (
+	StockMovementTypeEntree     StockMovementType = "ENTREE"
+	StockMovementTypeSortie     StockMovementType = "SORTIE"
+	StockMovementTypeAjustement StockMovementType = "AJUSTEMENT"
+)
+
+var AllStockMovementType = []StockMovementType{
+	StockMovementTypeEntree,
+	StockMovementTypeSortie,
+	StockMovementTypeAjustement,
+}
+
+func (e StockMovementType) IsValid() bool {
+	switch e {
+	case StockMovementTypeEntree, StockMovementTypeSortie, StockMovementTypeAjustement:
+		return true
+	}
+	return false
+}
+
+func (e StockMovementType) String() string {
+	return string(e)
+}
+
+func (e *StockMovementType) UnmarshalGQL(v interface{}) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = StockMovementType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid StockMovementType", str)
+	}
+	return nil
+}
+
+func (e StockMovementType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
 }

@@ -75,22 +75,29 @@ func convertCompanyToGraphQL(dbCompany *database.Company, db *database.DB, loadS
 		subscriptionModel = convertSubscriptionToGraphQL(subscription)
 	}
 
+	// Convert exchange rates
+	var exchangeRateModels []*model.ExchangeRate
+	for _, rate := range dbCompany.ExchangeRates {
+		exchangeRateModels = append(exchangeRateModels, convertExchangeRateToGraphQL(&rate))
+	}
+
 	return &model.Company{
-		ID:          dbCompany.ID.Hex(),
-		Name:        dbCompany.Name,
-		Address:     dbCompany.Address,
-		Phone:       dbCompany.Phone,
-		Email:       dbCompany.Email,
-		Description: dbCompany.Description,
-		Type:        dbCompany.Type,
-		Logo:        dbCompany.Logo,
-		Rccm:        dbCompany.Rccm,
-		IDNat:       dbCompany.IDNat,
-		IDCommerce:  dbCompany.IDCommerce,
-		Stores:      storeModels,
-		Subscription: subscriptionModel,
-		CreatedAt:   dbCompany.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   dbCompany.UpdatedAt.Format(time.RFC3339),
+		ID:            dbCompany.ID.Hex(),
+		Name:          dbCompany.Name,
+		Address:       dbCompany.Address,
+		Phone:         dbCompany.Phone,
+		Email:         dbCompany.Email,
+		Description:   dbCompany.Description,
+		Type:          dbCompany.Type,
+		Logo:          dbCompany.Logo,
+		Rccm:          dbCompany.Rccm,
+		IDNat:         dbCompany.IDNat,
+		IDCommerce:    dbCompany.IDCommerce,
+		Stores:        storeModels,
+		Subscription:  subscriptionModel,
+		ExchangeRates: exchangeRateModels,
+		CreatedAt:     dbCompany.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     dbCompany.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -142,22 +149,38 @@ func convertSubscriptionToGraphQL(dbSubscription *database.Subscription) *model.
 	}
 
 	return &model.CompanySubscription{
-		ID:                  dbSubscription.ID.Hex(),
-		CompanyID:           dbSubscription.CompanyID.Hex(),
-		Plan:                dbSubscription.Plan,
-		Status:              dbSubscription.Status,
-		TrialStartDate:      dbSubscription.TrialStartDate.Format(time.RFC3339),
-		TrialEndDate:        dbSubscription.TrialEndDate.Format(time.RFC3339),
+		ID:                    dbSubscription.ID.Hex(),
+		CompanyID:             dbSubscription.CompanyID.Hex(),
+		Plan:                  dbSubscription.Plan,
+		Status:                dbSubscription.Status,
+		TrialStartDate:        dbSubscription.TrialStartDate.Format(time.RFC3339),
+		TrialEndDate:          dbSubscription.TrialEndDate.Format(time.RFC3339),
 		SubscriptionStartDate: subscriptionStartDate,
-		SubscriptionEndDate: subscriptionEndDate,
-		PaymentMethod:       dbSubscription.PaymentMethod,
-		PaymentID:           dbSubscription.PaymentID,
-		MaxStores:           dbSubscription.MaxStores,
-		MaxUsers:            dbSubscription.MaxUsers,
-		DaysRemaining:       daysRemaining,
-		IsTrialExpired:      isTrialExpired,
-		CreatedAt:           dbSubscription.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:           dbSubscription.UpdatedAt.Format(time.RFC3339),
+		SubscriptionEndDate:   subscriptionEndDate,
+		PaymentMethod:         dbSubscription.PaymentMethod,
+		PaymentID:             dbSubscription.PaymentID,
+		MaxStores:             dbSubscription.MaxStores,
+		MaxUsers:              dbSubscription.MaxUsers,
+		DaysRemaining:         daysRemaining,
+		IsTrialExpired:        isTrialExpired,
+		CreatedAt:             dbSubscription.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:             dbSubscription.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// convertExchangeRateToGraphQL converts a database ExchangeRate to a GraphQL ExchangeRate
+func convertExchangeRateToGraphQL(dbRate *database.ExchangeRate) *model.ExchangeRate {
+	if dbRate == nil {
+		return nil
+	}
+
+	return &model.ExchangeRate{
+		FromCurrency: dbRate.FromCurrency,
+		ToCurrency:   dbRate.ToCurrency,
+		Rate:         dbRate.Rate,
+		IsDefault:    dbRate.IsDefault,
+		UpdatedAt:    dbRate.UpdatedAt.Format(time.RFC3339),
+		UpdatedBy:    dbRate.UpdatedBy,
 	}
 }
 
@@ -204,16 +227,16 @@ func convertStoreToGraphQL(dbStore *database.Store, db *database.DB, loadCompany
 	}
 
 	return &model.Store{
-		ID:                 dbStore.ID.Hex(),
-		Name:               dbStore.Name,
-		Address:            dbStore.Address,
-		Phone:              dbStore.Phone,
-		CompanyID:          dbStore.CompanyID.Hex(),
-		Company:            companyModel,
-		DefaultCurrency:    defaultCurrency,
+		ID:                  dbStore.ID.Hex(),
+		Name:                dbStore.Name,
+		Address:             dbStore.Address,
+		Phone:               dbStore.Phone,
+		CompanyID:           dbStore.CompanyID.Hex(),
+		Company:             companyModel,
+		DefaultCurrency:     defaultCurrency,
 		SupportedCurrencies: supportedCurrencies,
-		CreatedAt:          dbStore.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:          dbStore.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:           dbStore.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:           dbStore.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -229,49 +252,57 @@ func convertProductToGraphQL(dbProduct *database.Product, db *database.DB) *mode
 		store = nil // Continue with nil, GraphQL will handle it
 	}
 
-	// Set default currency if empty (for backward compatibility with existing products)
-	currency := dbProduct.Currency
-	if currency == "" {
-		// Get default currency from store
-		if store != nil {
-			currency = store.DefaultCurrency
-		}
-		if currency == "" {
-			currency = "USD" // Fallback to USD
-		}
-	}
-
-	// Load provider if providerId is set
-	var providerID *string
-	var providerModel *model.Provider
-	if dbProduct.ProviderID != nil && !dbProduct.ProviderID.IsZero() {
-		providerIDStr := dbProduct.ProviderID.Hex()
-		providerID = &providerIDStr
-
-		provider, err := db.FindProviderByID(providerIDStr)
-		if err != nil {
-			utils.LogError(err, "Failed to load provider for product")
-			provider = nil // Continue with nil, provider is optional
-		}
-		if provider != nil {
-			providerModel = convertProviderToGraphQL(provider, db)
-		}
-	}
-
 	return &model.Product{
-		ID:         dbProduct.ID.Hex(),
-		Name:       dbProduct.Name,
-		Mark:       dbProduct.Mark,
-		PriceVente: dbProduct.PriceVente,
-		PriceAchat: dbProduct.PriceAchat,
-		Currency:   currency,
-		Stock:      dbProduct.Stock,
-		StoreID:    dbProduct.StoreID.Hex(),
+		ID:        dbProduct.ID.Hex(),
+		Name:      dbProduct.Name,
+		Mark:      dbProduct.Mark,
+		StoreID:   dbProduct.StoreID.Hex(),
+		Store:     convertStoreToGraphQL(store, db, true),
+		CreatedAt: dbProduct.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: dbProduct.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func convertProductInStockToGraphQL(dbProductInStock *database.ProductInStock, db *database.DB) *model.ProductInStock {
+	if dbProductInStock == nil {
+		return nil
+	}
+
+	// Load product template
+	product, err := db.FindProductByID(dbProductInStock.ProductID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load product template")
+		product = nil
+	}
+
+	// Load store
+	store, err := db.FindStoreByID(dbProductInStock.StoreID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load store for product in stock")
+		store = nil
+	}
+
+	// Load provider
+	provider, err := db.FindProviderByID(dbProductInStock.ProviderID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load provider for product in stock")
+		provider = nil
+	}
+
+	return &model.ProductInStock{
+		ID:         dbProductInStock.ID.Hex(),
+		ProductID:  dbProductInStock.ProductID.Hex(),
+		Product:    convertProductToGraphQL(product, db),
+		PriceVente: dbProductInStock.PriceVente,
+		PriceAchat: dbProductInStock.PriceAchat,
+		Currency:   dbProductInStock.Currency,
+		Stock:      dbProductInStock.Stock,
+		StoreID:    dbProductInStock.StoreID.Hex(),
 		Store:      convertStoreToGraphQL(store, db, true),
-		ProviderID: providerID,
-		Provider:   providerModel,
-		CreatedAt:  dbProduct.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:  dbProduct.UpdatedAt.Format(time.RFC3339),
+		ProviderID: dbProductInStock.ProviderID.Hex(),
+		Provider:   convertProviderToGraphQL(provider, db),
+		CreatedAt:  dbProductInStock.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:  dbProductInStock.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -287,14 +318,30 @@ func convertClientToGraphQL(dbClient *database.Client, db *database.DB) *model.C
 		store = nil // Continue with nil, GraphQL will handle it
 	}
 
+	// Calculer la dette actuelle
+	currentDebt, err := db.GetClientCurrentDebt(dbClient.ID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to calculate current debt for client")
+		currentDebt = 0
+	}
+
+	// Calculer le crédit disponible
+	availableCredit := dbClient.CreditLimit - currentDebt
+	if availableCredit < 0 {
+		availableCredit = 0
+	}
+
 	return &model.Client{
-		ID:        dbClient.ID.Hex(),
-		Name:      dbClient.Name,
-		Phone:     dbClient.Phone,
-		StoreID:   dbClient.StoreID.Hex(),
-		Store:     convertStoreToGraphQL(store, db, true),
-		CreatedAt: dbClient.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: dbClient.UpdatedAt.Format(time.RFC3339),
+		ID:              dbClient.ID.Hex(),
+		Name:            dbClient.Name,
+		Phone:           dbClient.Phone,
+		StoreID:         dbClient.StoreID.Hex(),
+		Store:           convertStoreToGraphQL(store, db, true),
+		CreditLimit:     dbClient.CreditLimit,
+		CurrentDebt:     currentDebt,
+		AvailableCredit: availableCredit,
+		CreatedAt:       dbClient.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       dbClient.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -539,16 +586,16 @@ func convertSaleToGraphQL(dbSale *database.Sale, db *database.DB) *model.Sale {
 	// Convert basket products
 	var saleProducts []*model.SaleProduct
 	for _, item := range dbSale.Basket {
-		product, err := db.FindProductByID(item.ProductID.Hex())
+		productInStock, err := db.FindProductInStockByID(item.ProductInStockID.Hex())
 		if err != nil {
-			utils.LogError(err, "Failed to load product for sale")
+			utils.LogError(err, "Failed to load product in stock for sale")
 			continue
 		}
 		saleProducts = append(saleProducts, &model.SaleProduct{
-			ProductID: item.ProductID.Hex(),
-			Product:   convertProductToGraphQL(product, db),
-			Quantity:  item.Quantity,
-			Price:     item.Price,
+			ProductInStockID: item.ProductInStockID.Hex(),
+			ProductInStock:   convertProductInStockToGraphQL(productInStock, db),
+			Quantity:         item.Quantity,
+			Price:            item.Price,
 		})
 	}
 
@@ -583,10 +630,10 @@ func convertSaleToGraphQL(dbSale *database.Sale, db *database.DB) *model.Sale {
 	// Calculate benefice: sum of (price - priceAchat) * quantity for each product
 	var benefice float64
 	for _, item := range dbSale.Basket {
-		product, err := db.FindProductByID(item.ProductID.Hex())
+		productInStock, err := db.FindProductInStockByID(item.ProductInStockID.Hex())
 		if err == nil {
 			// Benefice = (prix de vente - prix d'achat) * quantité
-			benefice += (item.Price - product.PriceAchat) * item.Quantity
+			benefice += (item.Price - productInStock.PriceAchat) * item.Quantity
 		}
 	}
 
@@ -904,5 +951,363 @@ func convertInventoryItemToGraphQL(dbItem *database.InventoryItem, db *database.
 		CountedBy:        dbItem.CountedBy.Hex(),
 		CountedByUser:    convertUserToGraphQL(countedByUser),
 		CountedAt:        dbItem.CountedAt.Format(time.RFC3339),
+	}
+}
+
+// convertSubscriptionPlanToGraphQL converts a database SubscriptionPlan to a GraphQL SubscriptionPlan
+func convertSubscriptionPlanToGraphQL(dbPlan *database.SubscriptionPlan) *model.SubscriptionPlan {
+	if dbPlan == nil {
+		return nil
+	}
+
+	var maxStores *int
+	var maxUsers *int
+	if dbPlan.MaxStores != nil {
+		maxStores = dbPlan.MaxStores
+	}
+	if dbPlan.MaxUsers != nil {
+		maxUsers = dbPlan.MaxUsers
+	}
+
+	return &model.SubscriptionPlan{
+		ID:            dbPlan.PlanID, // Use PlanID as the GraphQL ID (e.g., "starter", "business", "enterprise")
+		Name:          dbPlan.Name,
+		Price:         dbPlan.Price,
+		Currency:      dbPlan.Currency,
+		BillingPeriod: dbPlan.BillingPeriod,
+		Description:   dbPlan.Description,
+		Features:      dbPlan.Features,
+		MaxStores:     maxStores,
+		MaxUsers:      maxUsers,
+		IsActive:      dbPlan.IsActive,
+		CreatedAt:     dbPlan.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     dbPlan.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// convertStockMovementToGraphQL converts a database StockMovement to a GraphQL StockMovement
+func convertStockMovementToGraphQL(dbMovement *database.StockMovement, db *database.DB) *model.StockMovement {
+	if dbMovement == nil {
+		return nil
+	}
+
+	// Load product
+	product, err := db.FindProductByID(dbMovement.ProductID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load product for stock movement")
+		product = nil
+	}
+
+	// Load store
+	store, err := db.FindStoreByID(dbMovement.StoreID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load store for stock movement")
+		store = nil
+	}
+
+	// Load operator
+	operator, err := db.FindUserByID(dbMovement.OperatorID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load operator for stock movement")
+		operator = nil
+	}
+
+	var referenceID *string
+	if dbMovement.ReferenceID != nil {
+		id := dbMovement.ReferenceID.Hex()
+		referenceID = &id
+	}
+
+	return &model.StockMovement{
+		ID:            dbMovement.ID.Hex(),
+		ProductID:     dbMovement.ProductID.Hex(),
+		Product:       convertProductToGraphQL(product, db),
+		StoreID:       dbMovement.StoreID.Hex(),
+		Store:         convertStoreToGraphQL(store, db, false),
+		Type:          model.StockMovementType(dbMovement.Type),
+		Quantity:      dbMovement.Quantity,
+		UnitPrice:     dbMovement.UnitPrice,
+		TotalValue:    dbMovement.TotalValue,
+		Currency:      dbMovement.Currency,
+		Reason:        stringPtr(dbMovement.Reason),
+		Reference:     stringPtr(dbMovement.Reference),
+		ReferenceType: stringPtr(dbMovement.ReferenceType),
+		ReferenceID:   referenceID,
+		OperatorID:    dbMovement.OperatorID.Hex(),
+		Operator:      convertUserToGraphQL(operator),
+		CreatedAt:     dbMovement.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     dbMovement.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// convertStockReportToGraphQL converts a database StockReportData to a GraphQL StockReport
+func convertStockReportToGraphQL(dbReport *database.StockReportData, db *database.DB) *model.StockReport {
+	if dbReport == nil {
+		return nil
+	}
+
+	// Load store
+	store, err := db.FindStoreByID(dbReport.StoreID)
+	if err != nil {
+		utils.LogError(err, "Failed to load store for stock report")
+		store = nil
+	}
+
+	// Convert movements by product
+	mouvementsParProduit := make([]*model.StockMovementByProduct, len(dbReport.MouvementsParProduit))
+	for i, prodData := range dbReport.MouvementsParProduit {
+		product, err := db.FindProductByID(prodData.ProductID.Hex())
+		if err != nil {
+			utils.LogError(err, "Failed to load product for stock report")
+			product = nil
+		}
+
+		mouvementsParProduit[i] = &model.StockMovementByProduct{
+			ProductID:           prodData.ProductID.Hex(),
+			Product:             convertProductToGraphQL(product, db),
+			TotalEntrees:        prodData.TotalEntrees,
+			TotalSorties:        prodData.TotalSorties,
+			TotalAjustements:    prodData.TotalAjustements,
+			SoldeInitial:        prodData.SoldeInitial,
+			SoldeFinal:          prodData.SoldeFinal,
+			NombreMouvements:    prodData.NombreMouvements,
+			ValeurTotaleEntrees: prodData.ValeurTotaleEntrees,
+			ValeurTotaleSorties: prodData.ValeurTotaleSorties,
+		}
+	}
+
+	// Convert daily resume
+	resumeParJour := make([]*model.StockReportResumeJour, len(dbReport.ResumeParJour))
+	for i, dayData := range dbReport.ResumeParJour {
+		resumeParJour[i] = &model.StockReportResumeJour{
+			Date:                dayData.Date,
+			Entrees:             dayData.Entrees,
+			Sorties:             dayData.Sorties,
+			Ajustements:         dayData.Ajustements,
+			Solde:               dayData.Solde,
+			NombreMouvements:    dayData.NombreMouvements,
+			ValeurTotaleEntrees: dayData.ValeurTotaleEntrees,
+			ValeurTotaleSorties: dayData.ValeurTotaleSorties,
+		}
+	}
+
+	// Convert movements
+	mouvements := make([]*model.StockMovement, len(dbReport.Mouvements))
+	for i, movement := range dbReport.Mouvements {
+		mouvements[i] = convertStockMovementToGraphQL(movement, db)
+	}
+
+	return &model.StockReport{
+		StoreID:              dbReport.StoreID,
+		Store:                convertStoreToGraphQL(store, db, false),
+		Currency:             dbReport.Currency,
+		Period:               dbReport.Period,
+		StartDate:            dbReport.StartDate.Format(time.RFC3339),
+		EndDate:              dbReport.EndDate.Format(time.RFC3339),
+		TotalEntrees:         dbReport.TotalEntrees,
+		TotalSorties:         dbReport.TotalSorties,
+		TotalAjustements:     dbReport.TotalAjustements,
+		SoldeInitial:         dbReport.SoldeInitial,
+		SoldeFinal:           dbReport.SoldeFinal,
+		NombreMouvements:     dbReport.NombreMouvements,
+		MouvementsParProduit: mouvementsParProduit,
+		ResumeParJour:        resumeParJour,
+		Mouvements:           mouvements,
+	}
+}
+
+// convertStockStatsToGraphQL converts a database StockStatsData to a GraphQL StockStats
+func convertStockStatsToGraphQL(dbStats *database.StockStatsData, db *database.DB) *model.StockStats {
+	if dbStats == nil {
+		return nil
+	}
+
+	// Convert top products by movements
+	topProducts := make([]*model.ProductMovementStats, len(dbStats.TopProductsByMovements))
+	for i, prodStats := range dbStats.TopProductsByMovements {
+		product, err := db.FindProductByID(prodStats.ProductID.Hex())
+		if err != nil {
+			utils.LogError(err, "Failed to load product for stock stats")
+			product = nil
+		}
+
+		topProducts[i] = &model.ProductMovementStats{
+			Product:          convertProductToGraphQL(product, db),
+			TotalEntrees:     prodStats.TotalEntrees,
+			TotalSorties:     prodStats.TotalSorties,
+			NombreMouvements: prodStats.NombreMouvements,
+		}
+	}
+
+	return &model.StockStats{
+		TotalProducts:          dbStats.TotalProducts,
+		TotalValue:             dbStats.TotalValue,
+		ProductsLowStock:       dbStats.ProductsLowStock,
+		ProductsOutOfStock:     dbStats.ProductsOutOfStock,
+		TotalEntrees:           dbStats.TotalEntrees,
+		TotalSorties:           dbStats.TotalSorties,
+		TopProductsByMovements: topProducts,
+	}
+}
+
+func convertStockSupplyToGraphQL(dbSupply *database.StockSupply, db *database.DB) *model.StockSupply {
+	if dbSupply == nil {
+		return nil
+	}
+
+	// Load product template
+	product, err := db.FindProductByID(dbSupply.ProductID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load product template for stock supply")
+		product = nil
+	}
+
+	// Load product in stock
+	productInStock, err := db.FindProductInStockByID(dbSupply.ProductInStockID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load product in stock for stock supply")
+		productInStock = nil
+	}
+
+	// Load provider
+	provider, err := db.FindProviderByID(dbSupply.ProviderID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load provider for stock supply")
+		provider = nil
+	}
+
+	// Load store
+	store, err := db.FindStoreByID(dbSupply.StoreID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load store for stock supply")
+		store = nil
+	}
+
+	// Load operator
+	operator, err := db.FindUserByID(dbSupply.OperatorID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load operator for stock supply")
+		operator = nil
+	}
+
+	// Load provider debt if applicable
+	var providerDebtID *string
+	var providerDebtModel *model.ProviderDebt
+	if dbSupply.ProviderDebtID != nil && !dbSupply.ProviderDebtID.IsZero() {
+		providerDebtIDStr := dbSupply.ProviderDebtID.Hex()
+		providerDebtID = &providerDebtIDStr
+
+		providerDebt, err := db.GetProviderDebtByID(providerDebtIDStr)
+		if err != nil {
+			utils.LogError(err, "Failed to load provider debt for stock supply")
+			providerDebt = nil
+		}
+		if providerDebt != nil {
+			providerDebtModel = convertProviderDebtToGraphQL(providerDebt, db)
+		}
+	}
+
+	return &model.StockSupply{
+		ID:               dbSupply.ID.Hex(),
+		ProductID:        dbSupply.ProductID.Hex(),
+		Product:          convertProductToGraphQL(product, db),
+		ProductInStockID: dbSupply.ProductInStockID.Hex(),
+		ProductInStock:   convertProductInStockToGraphQL(productInStock, db),
+		Quantity:         dbSupply.Quantity,
+		PriceAchat:       dbSupply.PriceAchat,
+		PriceVente:       dbSupply.PriceVente,
+		Currency:         dbSupply.Currency,
+		ProviderID:       dbSupply.ProviderID.Hex(),
+		Provider:         convertProviderToGraphQL(provider, db),
+		StoreID:          dbSupply.StoreID.Hex(),
+		Store:            convertStoreToGraphQL(store, db, true),
+		OperatorID:       dbSupply.OperatorID.Hex(),
+		Operator:         convertUserToGraphQL(operator),
+		PaymentType:      dbSupply.PaymentType,
+		ProviderDebtID:   providerDebtID,
+		ProviderDebt:     providerDebtModel,
+		Date:             dbSupply.Date.Format(time.RFC3339),
+		CreatedAt:        dbSupply.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:        dbSupply.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func convertProviderDebtToGraphQL(dbDebt *database.ProviderDebt, db *database.DB) *model.ProviderDebt {
+	if dbDebt == nil {
+		return nil
+	}
+
+	// Load supply
+	supply, err := db.FindStockSupplyByID(dbDebt.SupplyID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load supply for provider debt")
+		supply = nil
+	}
+
+	// Load provider
+	provider, err := db.FindProviderByID(dbDebt.ProviderID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load provider for provider debt")
+		provider = nil
+	}
+
+	// Load store
+	store, err := db.FindStoreByID(dbDebt.StoreID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load store for provider debt")
+		store = nil
+	}
+
+	// Load payments
+	payments, err := db.GetProviderDebtPayments(dbDebt.ID.Hex())
+	if err != nil {
+		utils.LogError(err, "Failed to load payments for provider debt")
+		payments = []*database.ProviderDebtPayment{}
+	}
+
+	var paymentModels []*model.ProviderDebtPayment
+	for _, payment := range payments {
+		operator, err := db.FindUserByID(payment.OperatorID.Hex())
+		if err != nil {
+			utils.LogError(err, "Failed to load operator for provider debt payment")
+			operator = nil
+		}
+		paymentModels = append(paymentModels, &model.ProviderDebtPayment{
+			ID:             payment.ID.Hex(),
+			ProviderDebtID: payment.ProviderDebtID.Hex(),
+			ProviderDebt:   convertProviderDebtToGraphQL(dbDebt, db), // This will cause recursion, but GraphQL handles it
+			Amount:         payment.Amount,
+			Currency:       payment.Currency,
+			OperatorID:     payment.OperatorID.Hex(),
+			Operator:       convertUserToGraphQL(operator),
+			StoreID:        payment.StoreID.Hex(),
+			Description:    payment.Description,
+			CreatedAt:      payment.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	var paidAt *string
+	if dbDebt.PaidAt != nil {
+		paidAtStr := dbDebt.PaidAt.Format(time.RFC3339)
+		paidAt = &paidAtStr
+	}
+
+	return &model.ProviderDebt{
+		ID:          dbDebt.ID.Hex(),
+		SupplyID:    dbDebt.SupplyID.Hex(),
+		Supply:      convertStockSupplyToGraphQL(supply, db),
+		ProviderID:  dbDebt.ProviderID.Hex(),
+		Provider:    convertProviderToGraphQL(provider, db),
+		StoreID:     dbDebt.StoreID.Hex(),
+		Store:       convertStoreToGraphQL(store, db, true),
+		TotalAmount: dbDebt.TotalAmount,
+		AmountPaid:  dbDebt.AmountPaid,
+		AmountDue:   dbDebt.AmountDue,
+		Currency:    dbDebt.Currency,
+		Status:      dbDebt.Status,
+		Payments:    paymentModels,
+		CreatedAt:   dbDebt.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   dbDebt.UpdatedAt.Format(time.RFC3339),
+		PaidAt:      paidAt,
 	}
 }

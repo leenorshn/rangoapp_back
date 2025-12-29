@@ -35,7 +35,7 @@ var PlanLimits = map[string]struct {
 }{
 	"trial": {
 		MaxStores: 1,
-		MaxUsers:  1,
+		MaxUsers:  2,
 		TrialDays: 14,
 	},
 	"starter": {
@@ -329,4 +329,150 @@ func (db *DB) CheckSubscriptionLimits(companyID string, action string) error {
 	}
 
 	return nil
+}
+
+// ExtendSubscriptionDates extends subscription dates by adding days based on company creation date
+// If the subscription is a trial, it updates TrialEndDate
+// If the subscription is paid, it updates SubscriptionEndDate
+func (db *DB) ExtendSubscriptionDates(companyID primitive.ObjectID, companyCreatedAt time.Time, additionalDays int) error {
+	subscriptionCollection := colHelper(db, "subscriptions")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	// Find subscription for this company
+	var subscription Subscription
+	err := subscriptionCollection.FindOne(ctx, bson.M{"companyId": companyID}).Decode(&subscription)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return gqlerror.Errorf("Subscription not found for company")
+		}
+		return gqlerror.Errorf("Error finding subscription: %v", err)
+	}
+
+	// Calculate new end date: company creation date + additional days
+	newEndDate := companyCreatedAt.AddDate(0, 0, additionalDays)
+
+	update := bson.M{
+		"updatedAt": time.Now(),
+	}
+
+	// Update appropriate date field based on subscription type
+	if subscription.Plan == "trial" {
+		// For trial subscriptions, update TrialEndDate
+		update["trialEndDate"] = newEndDate
+	} else {
+		// For paid subscriptions, update SubscriptionEndDate
+		update["subscriptionEndDate"] = newEndDate
+	}
+
+	// Update the subscription
+	_, err = subscriptionCollection.UpdateOne(
+		ctx,
+		bson.M{"_id": subscription.ID},
+		bson.M{"$set": update},
+	)
+	if err != nil {
+		return gqlerror.Errorf("Error updating subscription dates: %v", err)
+	}
+
+	return nil
+}
+
+// CreateTrialSubscriptionWithCustomDays creates a trial subscription with custom number of days
+func (db *DB) CreateTrialSubscriptionWithCustomDays(companyID primitive.ObjectID, trialDays int) (*Subscription, error) {
+	subscriptionCollection := colHelper(db, "subscriptions")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	now := time.Now()
+	trialEndDate := now.AddDate(0, 0, trialDays)
+
+	subscription := Subscription{
+		ID:             primitive.NewObjectID(),
+		CompanyID:      companyID,
+		Plan:           "trial",
+		Status:         "active",
+		TrialStartDate: now,
+		TrialEndDate:   trialEndDate,
+		MaxStores:      PlanLimits["trial"].MaxStores,
+		MaxUsers:       PlanLimits["trial"].MaxUsers,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	_, err := subscriptionCollection.InsertOne(ctx, subscription)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error creating subscription: %v", err)
+	}
+
+	return &subscription, nil
+}
+
+// ExtendSubscriptionByDays extends an existing subscription by adding days to its end date
+// Returns updated subscription info as a map
+func (db *DB) ExtendSubscriptionByDays(subscriptionID primitive.ObjectID, additionalDays int) (map[string]interface{}, error) {
+	subscriptionCollection := colHelper(db, "subscriptions")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	// Find subscription
+	var subscription Subscription
+	err := subscriptionCollection.FindOne(ctx, bson.M{"_id": subscriptionID}).Decode(&subscription)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, gqlerror.Errorf("Subscription not found")
+		}
+		return nil, gqlerror.Errorf("Error finding subscription: %v", err)
+	}
+
+	update := bson.M{
+		"updatedAt": time.Now(),
+		"status":    "active", // Reactivate subscription
+	}
+
+	result := make(map[string]interface{})
+	result["plan"] = subscription.Plan
+	result["previousStatus"] = subscription.Status
+
+	// Extend appropriate date field based on subscription type
+	if subscription.Plan == "trial" {
+		// For trial subscriptions, extend TrialEndDate
+		currentEndDate := subscription.TrialEndDate
+		newEndDate := currentEndDate.AddDate(0, 0, additionalDays)
+		update["trialEndDate"] = newEndDate
+
+		result["dateType"] = "trialEndDate"
+		result["previousEndDate"] = currentEndDate
+		result["newEndDate"] = newEndDate
+	} else if subscription.SubscriptionEndDate != nil {
+		// For paid subscriptions with end date, extend SubscriptionEndDate
+		currentEndDate := *subscription.SubscriptionEndDate
+		newEndDate := currentEndDate.AddDate(0, 0, additionalDays)
+		update["subscriptionEndDate"] = newEndDate
+
+		result["dateType"] = "subscriptionEndDate"
+		result["previousEndDate"] = currentEndDate
+		result["newEndDate"] = newEndDate
+	} else {
+		// For subscriptions without end date, add a trial end date
+		now := time.Now()
+		newEndDate := now.AddDate(0, 0, additionalDays)
+		update["trialEndDate"] = newEndDate
+
+		result["dateType"] = "trialEndDate"
+		result["previousEndDate"] = nil
+		result["newEndDate"] = newEndDate
+	}
+
+	// Update the subscription
+	_, err = subscriptionCollection.UpdateOne(
+		ctx,
+		bson.M{"_id": subscriptionID},
+		bson.M{"$set": update},
+	)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error extending subscription: %v", err)
+	}
+
+	return result, nil
 }

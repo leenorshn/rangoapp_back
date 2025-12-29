@@ -171,32 +171,8 @@ func ValidateCreateProductInput(input *model.CreateProductInput) error {
 	if err := ValidateString(input.Mark, "Product mark", true, 1, 100); err != nil {
 		return err
 	}
-	if err := ValidateFloat(input.PriceVente, "Price de vente", true, 0, 0); err != nil {
-		return err
-	}
-	if err := ValidateFloat(input.PriceAchat, "Price d'achat", true, 0, 0); err != nil {
-		return err
-	}
-	if err := ValidateProductPrices(input.PriceVente, input.PriceAchat); err != nil {
-		return err
-	}
-	if err := ValidateFloat(input.Stock, "Stock", true, 0, 0); err != nil {
-		return err
-	}
-	// Currency is optional - if provided, validate it
-	if input.Currency != nil && *input.Currency != "" {
-		if err := ValidateCurrency(*input.Currency); err != nil {
-			return err
-		}
-	}
 	if err := ValidateObjectID(input.StoreID, "Store ID"); err != nil {
 		return err
-	}
-	// ProviderID is optional - if provided, validate it
-	if input.ProviderID != nil && *input.ProviderID != "" {
-		if err := ValidateObjectID(*input.ProviderID, "Provider ID"); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -210,47 +186,6 @@ func ValidateUpdateProductInput(input *model.UpdateProductInput) error {
 	}
 	if input.Mark != nil {
 		if err := ValidateString(*input.Mark, "Product mark", false, 1, 100); err != nil {
-			return err
-		}
-	}
-	if input.PriceVente != nil && input.PriceAchat != nil {
-		if err := ValidateFloat(*input.PriceVente, "Price de vente", false, 0, 0); err != nil {
-			return err
-		}
-		if err := ValidateFloat(*input.PriceAchat, "Price d'achat", false, 0, 0); err != nil {
-			return err
-		}
-		if err := ValidateProductPrices(*input.PriceVente, *input.PriceAchat); err != nil {
-			return err
-		}
-	} else if input.PriceVente != nil || input.PriceAchat != nil {
-		// If only one is provided, we can't validate the relationship
-		// This should be handled at the database level by fetching current values
-		if input.PriceVente != nil {
-			if err := ValidateFloat(*input.PriceVente, "Price de vente", false, 0, 0); err != nil {
-				return err
-			}
-		}
-		if input.PriceAchat != nil {
-			if err := ValidateFloat(*input.PriceAchat, "Price d'achat", false, 0, 0); err != nil {
-				return err
-			}
-		}
-	}
-	if input.Stock != nil {
-		if err := ValidateFloat(*input.Stock, "Stock", false, 0, 0); err != nil {
-			return err
-		}
-	}
-	// Currency is optional - if provided, validate it
-	if input.Currency != nil && *input.Currency != "" {
-		if err := ValidateCurrency(*input.Currency); err != nil {
-			return err
-		}
-	}
-	// ProviderID is optional - if provided, validate it
-	if input.ProviderID != nil && *input.ProviderID != "" {
-		if err := ValidateObjectID(*input.ProviderID, "Provider ID"); err != nil {
 			return err
 		}
 	}
@@ -483,7 +418,7 @@ func ValidateCreateCaisseTransactionInput(input *model.CreateCaisseTransactionIn
 
 // ValidateSaleProductInput validates SaleProductInput
 func ValidateSaleProductInput(input *model.SaleProductInput) error {
-	if err := ValidateObjectID(input.ProductID, "Product ID"); err != nil {
+	if err := ValidateObjectID(input.ProductInStockID, "Product In Stock ID"); err != nil {
 		return err
 	}
 	if err := ValidateFloat(input.Quantity, "Quantity", true, 0.01, 0); err != nil {

@@ -1,9 +1,12 @@
 package middlewares
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAuthMiddleware_PanicPrevention(t *testing.T) {
@@ -121,5 +124,45 @@ func TestAuthMiddleware_PanicPrevention(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAuthMiddleware_OPTIONSRequest(t *testing.T) {
+	req := httptest.NewRequest("OPTIONS", "/", nil)
+	rr := httptest.NewRecorder()
+
+	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	handler.ServeHTTP(rr, req)
+	
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestAuthMiddleware_NoAuthHeader(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+
+	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	handler.ServeHTTP(rr, req)
+	
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestCtxValue(t *testing.T) {
+	t.Run("Context without value", func(t *testing.T) {
+		ctx := context.Background()
+		claim := CtxValue(ctx)
+		assert.Nil(t, claim)
+	})
+
+	t.Run("Context with invalid value type", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), userCtxKey, "invalid")
+		claim := CtxValue(ctx)
+		assert.Nil(t, claim)
+	})
 }
 

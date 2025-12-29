@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"rangoapp/utils"
+
 	"github.com/vektah/gqlparser/v2/gqlerror"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -13,9 +15,9 @@ import (
 )
 
 type ProductInBasket struct {
-	ProductID primitive.ObjectID `bson:"productId" json:"productId"`
-	Quantity  float64            `bson:"quantity" json:"quantity"`
-	Price     float64            `bson:"price" json:"price"`
+	ProductInStockID primitive.ObjectID `bson:"productInStockId" json:"productInStockId"`
+	Quantity         float64            `bson:"quantity" json:"quantity"`
+	Price            float64            `bson:"price" json:"price"`
 }
 
 type Sale struct {
@@ -53,25 +55,48 @@ func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float6
 		if client.StoreID != storeID {
 			return nil, gqlerror.Errorf("Client does not belong to the specified store")
 		}
+
+		// Vérifier le crédit disponible si c'est une vente à crédit
+		if paymentType == "debt" || paymentType == "advance" {
+			// Calculer le montant qui sera à crédit
+			amountOnCredit := priceToPay - pricePayed
+			if amountOnCredit > 0 {
+				// Vérifier si le client a assez de crédit disponible
+				hasEnough, availableCredit, err := db.CheckClientCredit(clientID.Hex(), amountOnCredit)
+				if err != nil {
+					return nil, err
+				}
+				if !hasEnough {
+					return nil, gqlerror.Errorf(
+						"Crédit insuffisant. Crédit disponible: %.2f, Montant requis: %.2f",
+						availableCredit,
+						amountOnCredit,
+					)
+				}
+			}
+		}
+	} else if paymentType == "debt" || paymentType == "advance" {
+		// Si c'est une vente à crédit, un client doit être spécifié
+		return nil, gqlerror.Errorf("Un client doit être spécifié pour les ventes à crédit")
 	}
 
-	// Verify all products belong to store
+	// Verify all products in stock belong to store
 	for _, item := range basket {
-		product, err := db.FindProductByID(item.ProductID.Hex())
+		productInStock, err := db.FindProductInStockByID(item.ProductInStockID.Hex())
 		if err != nil {
-			return nil, gqlerror.Errorf("Product not found: %s", item.ProductID.Hex())
+			return nil, gqlerror.Errorf("Product in stock not found: %s", item.ProductInStockID.Hex())
 		}
-		if product.StoreID != storeID {
-			return nil, gqlerror.Errorf("Product %s does not belong to the specified store", item.ProductID.Hex())
+		if productInStock.StoreID != storeID {
+			return nil, gqlerror.Errorf("Product in stock %s does not belong to the specified store", item.ProductInStockID.Hex())
 		}
 
 		// Check stock availability
-		if product.Stock < item.Quantity {
-			return nil, gqlerror.Errorf("Insufficient stock for product %s", item.ProductID.Hex())
+		if productInStock.Stock < item.Quantity {
+			return nil, gqlerror.Errorf("Insufficient stock for product in stock %s", item.ProductInStockID.Hex())
 		}
 
-		// Update product stock
-		err = db.UpdateProductStock(item.ProductID.Hex(), -item.Quantity)
+		// Update product in stock
+		err = db.UpdateProductInStockStock(item.ProductInStockID.Hex(), -item.Quantity)
 		if err != nil {
 			return nil, err
 		}
@@ -180,6 +205,35 @@ func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float6
 		if err != nil {
 			// Log error but don't fail the sale creation
 			// The sale is already created, we just log the caisse transaction error
+		}
+	}
+
+	// Automatically create stock movements (SORTIE) for each product in the sale
+	for _, item := range basket {
+		// Get product in stock to find the product template ID
+		productInStock, err := db.FindProductInStockByID(item.ProductInStockID.Hex())
+		if err != nil {
+			utils.LogError(err, fmt.Sprintf("Error finding product in stock %s", item.ProductInStockID.Hex()))
+			continue
+		}
+
+		// Create stock movement using the product template ID
+		_, err = db.CreateStockMovement(
+			productInStock.ProductID.Hex(),
+			storeID.Hex(),
+			StockMovementTypeSortie,
+			item.Quantity,
+			item.Price,
+			currency,
+			operatorID,
+			fmt.Sprintf("Vente #%s", sale.ID.Hex()),
+			fmt.Sprintf("sale-%s", sale.ID.Hex()),
+			"SALE",
+			&sale.ID,
+		)
+		if err != nil {
+			// Log error but don't fail the sale creation
+			utils.LogError(err, fmt.Sprintf("Error creating stock movement for product %s", productInStock.ProductID.Hex()))
 		}
 	}
 

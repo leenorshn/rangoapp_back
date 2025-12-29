@@ -9,15 +9,15 @@ import (
 )
 
 type Store struct {
-	ID                 primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name               string             `bson:"name" json:"name"`
-	Address            string             `bson:"address" json:"address"`
-	Phone              string             `bson:"phone" json:"phone"`
-	CompanyID          primitive.ObjectID `bson:"companyId" json:"companyId"`
-	DefaultCurrency    string             `bson:"defaultCurrency" json:"defaultCurrency"`       // Currency par défaut (ex: "USD", "CDF")
+	ID                  primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name                string             `bson:"name" json:"name"`
+	Address             string             `bson:"address" json:"address"`
+	Phone               string             `bson:"phone" json:"phone"`
+	CompanyID           primitive.ObjectID `bson:"companyId" json:"companyId"`
+	DefaultCurrency     string             `bson:"defaultCurrency" json:"defaultCurrency"`         // Currency par défaut (ex: "USD", "CDF")
 	SupportedCurrencies []string           `bson:"supportedCurrencies" json:"supportedCurrencies"` // Liste des currencies supportées
-	CreatedAt          time.Time          `bson:"createdAt" json:"createdAt"`
-	UpdatedAt          time.Time          `bson:"updatedAt" json:"updatedAt"`
+	CreatedAt           time.Time          `bson:"createdAt" json:"createdAt"`
+	UpdatedAt           time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
 
 func (db *DB) CreateStore(name, address, phone string, companyID primitive.ObjectID, defaultCurrency string, supportedCurrencies []string) (*Store, error) {
@@ -58,15 +58,15 @@ func (db *DB) CreateStore(name, address, phone string, companyID primitive.Objec
 	}
 
 	store := Store{
-		ID:                 primitive.NewObjectID(),
-		Name:               name,
-		Address:            address,
-		Phone:              phone,
-		CompanyID:          companyID,
-		DefaultCurrency:    defaultCurrency,
+		ID:                  primitive.NewObjectID(),
+		Name:                name,
+		Address:             address,
+		Phone:               phone,
+		CompanyID:           companyID,
+		DefaultCurrency:     defaultCurrency,
 		SupportedCurrencies: supportedCurrencies,
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 
 	_, err := storeCollection.InsertOne(ctx, store)
@@ -328,3 +328,70 @@ func (db *DB) VerifyStoreAccess(storeID, companyID string) (bool, error) {
 	return store.CompanyID == companyObjectID, nil
 }
 
+// FindAllStores retrieves all stores from the database
+func (db *DB) FindAllStores() ([]*Store, error) {
+	storeCollection := colHelper(db, "stores")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	cursor, err := storeCollection.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, gqlerror.Errorf("Error finding stores: %v", err)
+	}
+	defer cursor.Close(ctx)
+
+	var stores []*Store
+	if err = cursor.All(ctx, &stores); err != nil {
+		return nil, gqlerror.Errorf("Error decoding stores: %v", err)
+	}
+
+	return stores, nil
+}
+
+// UpdateStoreCurrencies updates the defaultCurrency and supportedCurrencies for a store
+func (db *DB) UpdateStoreCurrencies(storeID primitive.ObjectID, defaultCurrency string, supportedCurrencies []string) error {
+	storeCollection := colHelper(db, "stores")
+	ctx, cancel := GetDBContext()
+	defer cancel()
+
+	// Validate currencies
+	if !isValidCurrency(defaultCurrency) {
+		return gqlerror.Errorf("Invalid default currency: %s", defaultCurrency)
+	}
+	for _, currency := range supportedCurrencies {
+		if !isValidCurrency(currency) {
+			return gqlerror.Errorf("Invalid supported currency: %s", currency)
+		}
+	}
+
+	// Ensure defaultCurrency is in supportedCurrencies
+	found := false
+	for _, currency := range supportedCurrencies {
+		if currency == defaultCurrency {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return gqlerror.Errorf("Default currency (%s) must be in the supported currencies list", defaultCurrency)
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"defaultCurrency":     defaultCurrency,
+			"supportedCurrencies": supportedCurrencies,
+			"updatedAt":           time.Now(),
+		},
+	}
+
+	_, err := storeCollection.UpdateOne(
+		ctx,
+		bson.M{"_id": storeID},
+		update,
+	)
+	if err != nil {
+		return gqlerror.Errorf("Error updating store currencies: %v", err)
+	}
+
+	return nil
+}
