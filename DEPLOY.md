@@ -265,3 +265,4 @@ Pour plus d'informations:
 - [Pricing Cloud Run](https://cloud.google.com/run/pricing)
 
 
+Le code est prêt. Le refresh token automatique fonctionnera dès que le backend implémentera la mutation refreshToken.

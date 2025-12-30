@@ -981,3 +981,5 @@ export const apolloClient = new ApolloClient({
 **Version :** 1.0  
 **Compatible avec :** Next.js 13+, React 18+
 
+
+

@@ -428,7 +428,136 @@ const CreateProductWizard = () => {
 
 ---
 
-### 3.4 Système d'Inventaire
+### 3.4 Gestion des Dettes Fournisseurs
+
+**Fonctionnalités à implémenter** :
+
+Les dettes fournisseurs sont créées automatiquement lors d'un approvisionnement (`stockSupply`) avec `paymentType: "debt"` et `amountPaid < totalAmount`.
+
+**Queries disponibles** :
+```graphql
+# Liste des dettes fournisseurs
+query ProviderDebts($storeId: String, $providerId: String, $status: String) {
+  providerDebts(storeId: $storeId, providerId: $providerId, status: $status) {
+    id
+    supply {
+      id
+      product { name mark }
+      quantity
+      priceAchat
+    }
+    provider { id name phone }
+    totalAmount
+    amountPaid
+    amountDue
+    currency
+    status
+    payments {
+      id
+      amount
+      description
+      createdAt
+      operator { name }
+    }
+  }
+}
+
+# Détails d'une dette
+query ProviderDebt($id: ID!) {
+  providerDebt(id: $id) {
+    id
+    supply { ... }
+    provider { ... }
+    totalAmount
+    amountPaid
+    amountDue
+    status
+    payments { ... }
+  }
+}
+```
+
+**Mutation disponible** :
+```graphql
+mutation PayProviderDebt($providerDebtId: ID!, $amount: Float!, $description: String!) {
+  payProviderDebt(
+    providerDebtId: $providerDebtId
+    amount: $amount
+    description: $description
+  ) {
+    id
+    amountPaid
+    amountDue
+    status
+    payments { ... }
+  }
+}
+```
+
+**Interfaces à créer** :
+1. **Page liste des dettes fournisseurs** :
+   - Filtrer par store, fournisseur, statut ("paid", "partial", "unpaid")
+   - Afficher : fournisseur, montant total, montant payé, montant dû, statut
+   - Indicateurs visuels : rouge (unpaid), orange (partial), vert (paid)
+
+2. **Page détail d'une dette** :
+   - Informations de l'approvisionnement associé
+   - Informations du fournisseur
+   - Historique des paiements
+   - Formulaire de paiement (partiel ou total)
+
+3. **Intégration dans les détails du fournisseur** :
+   - Afficher toutes les dettes du fournisseur
+   - Total des dettes en attente
+   - Lien vers le paiement
+
+4. **Intégration dans les détails de l'approvisionnement** :
+   - Afficher la dette associée (si `paymentType: "debt"`)
+   - Lien vers le paiement
+
+**Exemple de composant** :
+```typescript
+const ProviderDebtCard = ({ debt }: { debt: ProviderDebt }) => {
+  const statusColors = {
+    unpaid: 'red',
+    partial: 'orange',
+    paid: 'green'
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <h3>{debt.provider.name}</h3>
+        <Badge color={statusColors[debt.status]}>
+          {debt.status}
+        </Badge>
+      </CardHeader>
+      <CardBody>
+        <div>Montant total: {debt.totalAmount} {debt.currency}</div>
+        <div>Montant payé: {debt.amountPaid} {debt.currency}</div>
+        <div>Montant dû: <strong>{debt.amountDue} {debt.currency}</strong></div>
+        <div>Approvisionnement: {debt.supply.product.name}</div>
+      </CardBody>
+      <CardFooter>
+        <Button onClick={() => openPaymentModal(debt.id)}>
+          Payer
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
+```
+
+**Workflow** :
+1. Créer un approvisionnement avec `paymentType: "debt"` et `amountPaid < totalAmount`
+2. Une dette est automatiquement créée
+3. Voir la dette dans la liste des dettes fournisseurs
+4. Payer la dette (partiel ou total) avec `payProviderDebt`
+5. Le paiement crée automatiquement une transaction de caisse (SORTIE)
+
+---
+
+### 3.5 Système d'Inventaire
 
 **Fonctionnalités à implémenter** (voir `FRONTEND_UPDATE_PROMPT.md` pour détails) :
 - Créer un inventaire (`createInventory`)
@@ -460,6 +589,7 @@ const CreateProductWizard = () => {
 - [ ] Gestion des currencies du store
 - [ ] Conversion de devises
 - [ ] Gestion complète des dettes clients
+- [ ] Gestion complète des dettes fournisseurs
 - [ ] Système d'inventaire complet
 - [ ] Rapports et statistiques améliorés
 
@@ -474,6 +604,7 @@ const CreateProductWizard = () => {
 4. ✅ Afficher la liste des produits avec stock
 5. ✅ Filtrer les produits par currency, fournisseur, stock
 6. ✅ Gérer les dettes clients
+7. ✅ Gérer les dettes fournisseurs
 7. ✅ Effectuer un inventaire
 
 ### Tests de Régression
@@ -604,6 +735,7 @@ mutation CreateSale($input: CreateSaleInput!) {
 
 - **Documentation complète** : `FRONTEND_UPDATE_ACTUEL.md`
 - **Dettes clients** : `FRONTEND_UPDATE_PROMPT.md` section "Ventes - Gestion des Dettes"
+- **Dettes fournisseurs** : `FRONTEND_UPDATE_ACTUEL.md` section 9 (créées automatiquement lors de `stockSupply` avec `paymentType: "debt"`)
 - **Inventaire** : `FRONTEND_UPDATE_PROMPT.md` section "Inventaire - Nouveau Système"
 - **Schéma GraphQL** : `graph/schema.graphqls`
 
@@ -624,4 +756,6 @@ mutation CreateSale($input: CreateSaleInput!) {
 **Date de création** : 28 décembre 2025  
 **Version Backend** : Architecture Product/ProductInStock  
 **Priorité** : 🔴 Critique - À faire immédiatement
+
+
 

@@ -60,6 +60,61 @@ func (r *mutationResolver) Register(ctx context.Context, input model.RegisterInp
 	}, nil
 }
 
+// RefreshToken is the resolver for the refreshToken field.
+func (r *mutationResolver) RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error) {
+	// Validate the refresh token
+	token, err := utils.JwtValidate(ctx, refreshToken)
+	if err != nil {
+		return nil, gqlerror.Errorf("Invalid or expired refresh token")
+	}
+
+	// Extract claims
+	claims, ok := token.Claims.(*utils.JwtCustomClaim)
+	if !ok || !token.Valid {
+		return nil, gqlerror.Errorf("Invalid refresh token")
+	}
+
+	// Get user from database
+	user, err := r.DB.FindUserByID(claims.ID)
+	if err != nil {
+		return nil, gqlerror.Errorf("User not found")
+	}
+
+	// Check if user is blocked
+	if user.IsBlocked {
+		return nil, gqlerror.Errorf("User is blocked")
+	}
+
+	// Convert storeIDs to strings
+	storeIDs := make([]string, len(user.StoreIDs))
+	for i, id := range user.StoreIDs {
+		storeIDs[i] = id.Hex()
+	}
+
+	assignedStoreID := ""
+	if user.AssignedStoreID != nil {
+		assignedStoreID = user.AssignedStoreID.Hex()
+	}
+
+	// Generate new access token
+	accessToken, err := utils.JwtGenerate(ctx, user.ID.Hex(), user.CompanyID.Hex(), user.Role, storeIDs, assignedStoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error generating access token: %v", err)
+	}
+
+	// Generate new refresh token
+	newRefreshToken, err := utils.JwtGenerateRefresh(ctx, user.ID.Hex(), user.CompanyID.Hex(), user.Role, storeIDs, assignedStoreID)
+	if err != nil {
+		return nil, gqlerror.Errorf("Error generating refresh token: %v", err)
+	}
+
+	return &model.AuthResponse{
+		AccessToken:  accessToken,
+		RefreshToken: newRefreshToken,
+		User:         convertUserToGraphQL(user),
+	}, nil
+}
+
 // Logout is the resolver for the logout field.
 func (r *mutationResolver) Logout(ctx context.Context) (bool, error) {
 	// JWT is stateless, so logout is just a success response

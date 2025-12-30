@@ -858,6 +858,7 @@ type Mutation {
   # Auth
   login(phone: String!, password: String!): AuthResponse!
   register(input: RegisterInput!): AuthResponse!
+  refreshToken(refreshToken: String!): AuthResponse!
   logout: Boolean! @auth
   
   # Users

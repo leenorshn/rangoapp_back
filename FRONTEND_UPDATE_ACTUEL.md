@@ -232,7 +232,227 @@ Voir le document `FRONTEND_UPDATE_PROMPT.md` pour les détails complets sur :
 
 ---
 
-### 9. ✅ **Inventaire - Déjà Prêt**
+### 9. ✅ **Dettes Fournisseurs - Déjà Prêt**
+
+Les dettes fournisseurs sont créées automatiquement lors d'un approvisionnement (`stockSupply`) avec `paymentType: "debt"` et `amountPaid < totalAmount`.
+
+#### Type `ProviderDebt`
+```graphql
+type ProviderDebt {
+  id: ID!
+  supplyId: String!           # ID de l'approvisionnement associé
+  supply: StockSupply!         # Approvisionnement associé
+  providerId: String!
+  provider: Provider!          # Fournisseur à qui on doit
+  storeId: String!
+  store: Store!
+  totalAmount: Float!          # Montant total de l'approvisionnement
+  amountPaid: Float!           # Montant déjà payé
+  amountDue: Float!            # Montant restant à payer
+  currency: String!           # "USD", "EUR" or "CDF"
+  status: String!             # "paid", "partial", "unpaid"
+  payments: [ProviderDebtPayment!]! # Historique des paiements
+  createdAt: String!
+  updatedAt: String!
+  paidAt: String             # Date de paiement complet (si status = "paid")
+}
+```
+
+#### Type `ProviderDebtPayment`
+```graphql
+type ProviderDebtPayment {
+  id: ID!
+  providerDebtId: String!
+  providerDebt: ProviderDebt! # Dette associée
+  amount: Float!
+  currency: String!           # "USD", "EUR" or "CDF"
+  operatorId: String!
+  operator: User!             # Utilisateur qui a enregistré le paiement
+  storeId: String!
+  store: Store!
+  description: String!
+  createdAt: String!
+}
+```
+
+#### Queries Disponibles
+
+**Liste des dettes fournisseurs** :
+```graphql
+query ProviderDebts($storeId: String, $providerId: String, $status: String) {
+  providerDebts(storeId: $storeId, providerId: $providerId, status: $status) {
+    id
+    supplyId
+    supply {
+      id
+      quantity
+      priceAchat
+      totalAmount: quantity * priceAchat
+    }
+    providerId
+    provider {
+      id
+      name
+      phone
+    }
+    storeId
+    store {
+      id
+      name
+    }
+    totalAmount
+    amountPaid
+    amountDue
+    currency
+    status
+    payments {
+      id
+      amount
+      description
+      createdAt
+      operator {
+        id
+        name
+      }
+    }
+    createdAt
+    updatedAt
+    paidAt
+  }
+}
+```
+
+**Détails d'une dette fournisseur** :
+```graphql
+query ProviderDebt($id: ID!) {
+  providerDebt(id: $id) {
+    id
+    supply {
+      id
+      product {
+        name
+        mark
+      }
+      quantity
+      priceAchat
+      priceVente
+      currency
+    }
+    provider {
+      id
+      name
+      phone
+      address
+    }
+    totalAmount
+    amountPaid
+    amountDue
+    currency
+    status
+    payments {
+      id
+      amount
+      description
+      createdAt
+      operator {
+        id
+        name
+      }
+    }
+    createdAt
+    updatedAt
+    paidAt
+  }
+}
+```
+
+#### Mutation Disponible
+
+**Payer une dette fournisseur** :
+```graphql
+mutation PayProviderDebt($providerDebtId: ID!, $amount: Float!, $description: String!) {
+  payProviderDebt(
+    providerDebtId: $providerDebtId
+    amount: $amount
+    description: $description
+  ) {
+    id
+    totalAmount
+    amountPaid
+    amountDue
+    status
+    payments {
+      id
+      amount
+      description
+      createdAt
+    }
+  }
+}
+```
+
+**Note importante** : 
+- Le paiement crée automatiquement une transaction de caisse (SORTIE)
+- Le montant payé ne peut pas dépasser `amountDue`
+- Le statut est mis à jour automatiquement : "unpaid" → "partial" → "paid"
+
+#### Workflow de Création de Dette Fournisseur
+
+1. **Créer un approvisionnement avec dette** :
+```graphql
+mutation StockSupply($input: StockSupplyInput!) {
+  stockSupply(input: {
+    productId: "product123"
+    quantity: 100
+    priceAchat: 50
+    priceVente: 100
+    currency: "USD"
+    storeId: "store123"
+    providerId: "provider456"
+    paymentType: "debt"      # ✅ Créera une dette
+    amountPaid: 2000         # Montant payé (optionnel)
+    # totalAmount = 100 * 50 = 5000
+    # amountDue = 5000 - 2000 = 3000
+  }) {
+    id
+    providerDebt {
+      id
+      amountDue
+      status
+    }
+  }
+}
+```
+
+2. **Payer la dette** (partiel ou total) :
+```graphql
+mutation PayProviderDebt($providerDebtId: ID!, $amount: Float!, $description: String!) {
+  payProviderDebt(
+    providerDebtId: $providerDebtId
+    amount: 1500              # Paiement partiel
+    description: "Paiement partiel - Chèque #1234"
+  ) {
+    id
+    amountPaid               # 2000 + 1500 = 3500
+    amountDue                # 5000 - 3500 = 1500
+    status                    # "partial"
+  }
+}
+```
+
+**Action Frontend** :
+- ✅ Créer une page/interface pour lister les dettes fournisseurs (`providerDebts` query)
+- ✅ Filtrer par store, fournisseur, et statut ("paid", "partial", "unpaid")
+- ✅ Afficher les dettes dans les détails du fournisseur
+- ✅ Permettre le paiement partiel ou total (`payProviderDebt` mutation)
+- ✅ Afficher l'historique des paiements pour chaque dette
+- ✅ Afficher un indicateur visuel pour les dettes en attente
+- ✅ Afficher les dettes liées à un approvisionnement (`supply.providerDebt`)
+- ✅ Calculer et afficher le total des dettes par fournisseur
+
+---
+
+### 10. ✅ **Inventaire - Déjà Prêt**
 
 Voir le document `FRONTEND_UPDATE_PROMPT.md` pour les détails complets sur :
 - Type `Inventory`
@@ -394,6 +614,7 @@ mutation {
 - ✅ Utilisation de `productInStockId` dans les ventes
 - ✅ Affichage des informations de `ProductInStock` (prix, stock, currency, provider)
 - ✅ Gestion des dettes clients (voir `FRONTEND_UPDATE_PROMPT.md`)
+- ✅ Gestion des dettes fournisseurs (voir section 9 ci-dessus)
 - ✅ Système d'inventaire (voir `FRONTEND_UPDATE_PROMPT.md`)
 
 ---
@@ -401,10 +622,13 @@ mutation {
 ## 📚 Documentation Complémentaire
 
 - **Dettes Clients** : Voir `FRONTEND_UPDATE_PROMPT.md` section "Ventes - Gestion des Dettes"
+- **Dettes Fournisseurs** : Voir section 9 ci-dessus (créées automatiquement lors de `stockSupply` avec `paymentType: "debt"`)
 - **Inventaire** : Voir `FRONTEND_UPDATE_PROMPT.md` section "Inventaire - Nouveau Système"
 - **Store Currencies** : Déjà implémenté et fonctionnel
 
 ---
 
 **Note** : Le document `FRONTEND_UPDATE_PROMPT.md` contient des informations obsolètes concernant les champs `currency` et `providerId` sur `Product`. Ces informations ne sont plus valides avec l'architecture actuelle.
+
+
 
