@@ -2,7 +2,9 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 
 	"github.com/vektah/gqlparser/v2/gqlerror"
 )
@@ -27,14 +29,28 @@ type AppError struct {
 	Original  error
 	Location  string
 	UserMsg   string // User-friendly message
+	Stack     string // Stack trace
 }
 
 // Error implements the error interface
 func (e *AppError) Error() string {
-	if e.Original != nil {
-		return fmt.Sprintf("%s: %s (original: %v)", e.Type, e.Message, e.Original)
+	var parts []string
+	parts = append(parts, fmt.Sprintf("[%s] %s", e.Type, e.Message))
+	
+	if e.Location != "" {
+		parts = append(parts, fmt.Sprintf("at %s", e.Location))
 	}
-	return fmt.Sprintf("%s: %s", e.Type, e.Message)
+	
+	if e.Original != nil {
+		parts = append(parts, fmt.Sprintf("(original: %v)", e.Original))
+	}
+	
+	return strings.Join(parts, " ")
+}
+
+// Unwrap returns the original error for error unwrapping
+func (e *AppError) Unwrap() error {
+	return e.Original
 }
 
 // ToGraphQLError converts AppError to gqlerror.Error
@@ -44,25 +60,57 @@ func (e *AppError) ToGraphQLError() *gqlerror.Error {
 		msg = e.UserMsg
 	}
 	
-	return &gqlerror.Error{
-		Message: msg,
-		Extensions: map[string]interface{}{
-			"code":     string(e.Type),
-			"location": e.Location,
-		},
+	extensions := map[string]interface{}{
+		"code":     string(e.Type),
+		"location": e.Location,
 	}
+	
+	// Include stack trace in development mode only
+	if os.Getenv("ENV") == "development" || os.Getenv("ENV") == "dev" {
+		if e.Stack != "" {
+			extensions["stack"] = e.Stack
+		}
+	}
+	
+	return &gqlerror.Error{
+		Message:    msg,
+		Extensions: extensions,
+	}
+}
+
+// getStackTrace captures a stack trace (up to 10 frames)
+func getStackTrace(skip int) string {
+	var stack []string
+	for i := 0; i < 10; i++ {
+		pc, file, line, ok := runtime.Caller(skip + i)
+		if !ok {
+			break
+		}
+		fn := runtime.FuncForPC(pc)
+		if fn != nil {
+			funcName := fn.Name()
+			// Simplify function names
+			if idx := strings.LastIndex(funcName, "/"); idx >= 0 {
+				funcName = funcName[idx+1:]
+			}
+			stack = append(stack, fmt.Sprintf("%s:%d %s", file, line, funcName))
+		}
+	}
+	return strings.Join(stack, "\n")
 }
 
 // NewError creates a new AppError
 func NewError(errType ErrorType, message string, original error) *AppError {
 	_, file, line, _ := runtime.Caller(1)
 	location := fmt.Sprintf("%s:%d", file, line)
+	stack := getStackTrace(1)
 	
 	return &AppError{
 		Type:     errType,
 		Message:  message,
 		Original: original,
-		Location:  location,
+		Location: location,
+		Stack:    stack,
 	}
 }
 
@@ -146,6 +194,57 @@ func HandleError(err error) error {
 	// Otherwise, wrap it as an internal error
 	appErr := NewDatabaseError("operation", err)
 	return appErr.ToGraphQLError()
+}
+
+// FromGraphQLError converts a gqlerror to AppError
+func FromGraphQLError(gqlErr *gqlerror.Error) *AppError {
+	errType := ErrorTypeInternal
+	if code, ok := gqlErr.Extensions["code"].(string); ok {
+		errType = ErrorType(code)
+	}
+	
+	location := ""
+	if loc, ok := gqlErr.Extensions["location"].(string); ok {
+		location = loc
+	}
+	
+	return &AppError{
+		Type:     errType,
+		Message:  gqlErr.Message,
+		UserMsg:  gqlErr.Message,
+		Location: location,
+		Stack:    getStackTrace(1),
+	}
+}
+
+// WrapGraphQLError wraps a gqlerror with additional context
+func WrapGraphQLError(gqlErr *gqlerror.Error, context string) *AppError {
+	appErr := FromGraphQLError(gqlErr)
+	appErr.Message = fmt.Sprintf("%s: %s", context, appErr.Message)
+	return appErr
+}
+
+// Errorf creates a new AppError with formatted message (replacement for gqlerror.Errorf)
+func Errorf(errType ErrorType, format string, args ...interface{}) *AppError {
+	message := fmt.Sprintf(format, args...)
+	return NewErrorWithUserMsg(errType, message, message, nil)
+}
+
+// ValidationErrorf creates a validation error with formatted message
+func ValidationErrorf(format string, args ...interface{}) *AppError {
+	return Errorf(ErrorTypeValidation, format, args...)
+}
+
+// NotFoundErrorf creates a not found error with formatted message
+func NotFoundErrorf(format string, args ...interface{}) *AppError {
+	return Errorf(ErrorTypeNotFound, format, args...)
+}
+
+// DatabaseErrorf creates a database error with formatted message
+func DatabaseErrorf(operation string, format string, args ...interface{}) *AppError {
+	message := fmt.Sprintf(format, args...)
+	userMsg := "A database error occurred. Please try again later."
+	return NewErrorWithUserMsg(ErrorTypeDatabase, fmt.Sprintf("Database error during %s: %s", operation, message), userMsg, nil)
 }
 
 

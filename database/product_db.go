@@ -10,12 +10,13 @@ import (
 )
 
 type Product struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name      string               `bson:"name" json:"name"`
-	Mark      string               `bson:"mark" json:"mark"`
-	StoreID   primitive.ObjectID   `bson:"storeId" json:"storeId"`
-	CreatedAt time.Time            `bson:"createdAt" json:"createdAt"`
-	UpdatedAt time.Time            `bson:"updatedAt" json:"updatedAt"`
+	ID        primitive.ObjectID  `bson:"_id,omitempty" json:"id"`
+	Name      string              `bson:"name" json:"name"`
+	Mark      string              `bson:"mark" json:"mark"`
+	StoreID   primitive.ObjectID  `bson:"storeId" json:"storeId"`
+	DeletedAt *time.Time          `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
+	CreatedAt time.Time           `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time           `bson:"updatedAt" json:"updatedAt"`
 }
 
 func (db *DB) CreateProduct(name, mark string, storeID primitive.ObjectID) (*Product, error) {
@@ -57,7 +58,7 @@ func (db *DB) FindProductByID(id string) (*Product, error) {
 	defer cancel()
 
 	var product Product
-	err = productCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&product)
+	err = productCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&product)
 	if err != nil {
 		return nil, gqlerror.Errorf("Product not found")
 	}
@@ -70,7 +71,7 @@ func (db *DB) FindProductsByStoreIDs(storeIDs []primitive.ObjectID) ([]*Product,
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cursor, err := productCollection.Find(ctx, bson.M{"storeId": bson.M{"$in": storeIDs}})
+	cursor, err := productCollection.Find(ctx, bson.M{"storeId": bson.M{"$in": storeIDs}, "deletedAt": nil})
 	if err != nil {
 		return nil, gqlerror.Errorf("Error finding products: %v", err)
 	}
@@ -98,6 +99,7 @@ func (db *DB) FindProductsByProviderID(providerID string, storeIDs []primitive.O
 	filter := bson.M{
 		"providerId": providerObjectID,
 		"storeId":    bson.M{"$in": storeIDs},
+		"deletedAt":  nil,
 	}
 
 	cursor, err := productCollection.Find(ctx, filter)
@@ -124,9 +126,9 @@ func (db *DB) UpdateProduct(id string, name, mark *string) (*Product, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Get current product
+	// Get current product (exclude deleted)
 	var currentProduct Product
-	err = productCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&currentProduct)
+	err = productCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&currentProduct)
 	if err != nil {
 		return nil, gqlerror.Errorf("Product not found")
 	}
@@ -168,7 +170,8 @@ func (db *DB) UpdateProductStock(id string, quantity float64) error {
 	return nil
 }
 
-func (db *DB) DeleteProduct(id string) error {
+// SoftDeleteProduct marks a product as deleted (soft delete)
+func (db *DB) SoftDeleteProduct(id string) error {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return gqlerror.Errorf("Invalid product ID")
@@ -178,10 +181,30 @@ func (db *DB) DeleteProduct(id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err = productCollection.DeleteOne(ctx, bson.M{"_id": objectID})
+	// Check if product exists and is not already deleted
+	var product Product
+	err = productCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&product)
 	if err != nil {
-		return gqlerror.Errorf("Error deleting product: %v", err)
+		return gqlerror.Errorf("Product not found or already deleted")
+	}
+
+	// Soft delete: set deletedAt
+	now := time.Now()
+	_, err = productCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"deletedAt": now,
+			"updatedAt": now,
+		},
+	})
+	if err != nil {
+		return gqlerror.Errorf("Error soft deleting product: %v", err)
 	}
 
 	return nil
+}
+
+// DeleteProduct is kept for backward compatibility but now uses soft delete
+// Deprecated: Use SoftDeleteProduct instead
+func (db *DB) DeleteProduct(id string) error {
+	return db.SoftDeleteProduct(id)
 }

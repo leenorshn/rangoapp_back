@@ -7,7 +7,6 @@ import (
 
 	"rangoapp/utils"
 
-	"github.com/vektah/gqlparser/v2/gqlerror"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -33,27 +32,26 @@ type Sale struct {
 	AmountDue   float64             `bson:"amountDue" json:"amountDue"`               // Montant dû (dette restante)
 	DebtStatus  string              `bson:"debtStatus" json:"debtStatus"`             // "paid", "partial", "unpaid", "none"
 	DebtID      *primitive.ObjectID `bson:"debtId,omitempty" json:"debtId,omitempty"` // Reference to debt if applicable
+	DeletedAt   *time.Time          `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
 	Date        time.Time           `bson:"date" json:"date"`
 	CreatedAt   time.Time           `bson:"createdAt" json:"createdAt"`
 	UpdatedAt   time.Time           `bson:"updatedAt" json:"updatedAt"`
 }
 
 // CreateSale creates a new sale entry and automatically creates a caisse transaction
+// All database operations are performed within a MongoDB transaction to ensure atomicity
 func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float64, currency, paymentType string, clientID *primitive.ObjectID, operatorID, storeID primitive.ObjectID, saleDate *time.Time) (*Sale, error) {
-	saleCollection := colHelper(db, "sales")
-	ctx, cancel := GetDBContext()
-	defer cancel()
-
-	var err error
+	// Pre-transaction validations (read-only operations)
+	// These don't need to be in the transaction but must pass before starting it
 
 	// Verify client belongs to store (only if client is provided)
 	if clientID != nil {
 		client, err := db.FindClientByID(clientID.Hex())
 		if err != nil {
-			return nil, gqlerror.Errorf("Client not found")
+			return nil, utils.NotFoundErrorf("Client not found")
 		}
 		if client.StoreID != storeID {
-			return nil, gqlerror.Errorf("Client does not belong to the specified store")
+			return nil, utils.ValidationErrorf("Client does not belong to the specified store")
 		}
 
 		// Vérifier le crédit disponible si c'est une vente à crédit
@@ -67,7 +65,7 @@ func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float6
 					return nil, err
 				}
 				if !hasEnough {
-					return nil, gqlerror.Errorf(
+					return nil, utils.ValidationErrorf(
 						"Crédit insuffisant. Crédit disponible: %.2f, Montant requis: %.2f",
 						availableCredit,
 						amountOnCredit,
@@ -77,29 +75,35 @@ func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float6
 		}
 	} else if paymentType == "debt" || paymentType == "advance" {
 		// Si c'est une vente à crédit, un client doit être spécifié
-		return nil, gqlerror.Errorf("Un client doit être spécifié pour les ventes à crédit")
+		return nil, utils.ValidationErrorf("Un client doit être spécifié pour les ventes à crédit")
 	}
 
-	// Verify all products in stock belong to store
+	// Verify all products in stock belong to store and check stock availability
+	// Store product info for later use in transaction
+	type productInfo struct {
+		productInStock *ProductInStock
+		quantity       float64
+	}
+	productInfos := make([]productInfo, 0, len(basket))
+
 	for _, item := range basket {
 		productInStock, err := db.FindProductInStockByID(item.ProductInStockID.Hex())
 		if err != nil {
-			return nil, gqlerror.Errorf("Product in stock not found: %s", item.ProductInStockID.Hex())
+			return nil, utils.NotFoundErrorf("Product in stock not found: %s", item.ProductInStockID.Hex())
 		}
 		if productInStock.StoreID != storeID {
-			return nil, gqlerror.Errorf("Product in stock %s does not belong to the specified store", item.ProductInStockID.Hex())
+			return nil, utils.ValidationErrorf("Product in stock %s does not belong to the specified store", item.ProductInStockID.Hex())
 		}
 
 		// Check stock availability
 		if productInStock.Stock < item.Quantity {
-			return nil, gqlerror.Errorf("Insufficient stock for product in stock %s", item.ProductInStockID.Hex())
+			return nil, utils.ValidationErrorf("Insufficient stock for product in stock %s", item.ProductInStockID.Hex())
 		}
 
-		// Update product in stock
-		err = db.UpdateProductInStockStock(item.ProductInStockID.Hex(), -item.Quantity)
-		if err != nil {
-			return nil, err
-		}
+		productInfos = append(productInfos, productInfo{
+			productInStock: productInStock,
+			quantity:       item.Quantity,
+		})
 	}
 
 	// Validate payment type
@@ -112,7 +116,7 @@ func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float6
 		"advance": true,
 	}
 	if !validPaymentTypes[paymentType] {
-		return nil, gqlerror.Errorf("Invalid payment type: %s. Valid types: cash, debt, advance", paymentType)
+		return nil, utils.ValidationErrorf("Invalid payment type: %s. Valid types: cash, debt, advance", paymentType)
 	}
 
 	// Set date
@@ -138,106 +142,196 @@ func (db *DB) CreateSale(basket []ProductInBasket, priceToPay, pricePayed float6
 		}
 	}
 
-	sale := Sale{
-		ID:          primitive.NewObjectID(),
-		Basket:      basket,
-		PriceToPay:  priceToPay,
-		PricePayed:  pricePayed,
-		Currency:    currency,
-		ClientID:    clientID,
-		OperatorID:  operatorID,
-		StoreID:     storeID,
-		PaymentType: paymentType,
-		AmountDue:   amountDue,
-		DebtStatus:  debtStatus,
-		Date:        date,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-
-	_, err = saleCollection.InsertOne(ctx, sale)
+	// Start MongoDB transaction
+	session, err := db.client.StartSession()
 	if err != nil {
-		return nil, gqlerror.Errorf("Error creating sale: %v", err)
+		return nil, utils.DatabaseErrorf("start_session", "Error starting transaction session: %v", err)
 	}
+	defer session.EndSession(context.Background())
 
-	// Create debt if payment type is debt or advance and there's an amount due
-	var debtID *primitive.ObjectID
-	if (paymentType == "debt" || paymentType == "advance") && amountDue > 0 && clientID != nil {
-		debt, err := db.CreateDebt(
-			sale.ID,
-			*clientID,
-			storeID,
-			priceToPay,
-			pricePayed,
-			amountDue,
-			currency,
-			paymentType,
-		)
-		if err != nil {
-			// Log error but don't fail the sale creation
-			// The sale is already created
-		} else {
-			debtID = &debt.ID
-			// Update sale with debt ID
-			_, err = saleCollection.UpdateOne(ctx, bson.M{"_id": sale.ID}, bson.M{"$set": bson.M{"debtId": debt.ID}})
+	// Transaction context with longer timeout for multiple operations
+	txCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var sale *Sale
+	err = mongo.WithSession(txCtx, session, func(sc mongo.SessionContext) error {
+		// Start transaction
+		if err := session.StartTransaction(); err != nil {
+			return utils.DatabaseErrorf("start_transaction", "Error starting transaction: %v", err)
+		}
+
+		// Collections
+		saleCollection := colHelper(db, "sales")
+		productInStockCollection := colHelper(db, "products_in_stock")
+		debtCollection := colHelper(db, "debts")
+		transCollection := colHelper(db, "trans")
+		stockMovementCollection := colHelper(db, "stock_movements")
+
+		// 1. Update product in stock quantities (within transaction)
+		for _, info := range productInfos {
+			_, err := productInStockCollection.UpdateOne(
+				sc,
+				bson.M{"_id": info.productInStock.ID},
+				bson.M{
+					"$inc": bson.M{"stock": -info.quantity},
+					"$set": bson.M{"updatedAt": time.Now()},
+				},
+			)
 			if err != nil {
-				// Log error but continue
-			} else {
-				sale.DebtID = debtID
+				return utils.DatabaseErrorf("update_product_stock", "Error updating product in stock %s: %v", info.productInStock.ID.Hex(), err)
 			}
 		}
-	}
 
-	// Automatically create an "Entree" (entry) transaction in caisse when a sale is created
-	// This represents money coming in from the sale
-	// Use pricePayed (the amount actually received) instead of priceToPay
-	// Only create transaction if money was actually received
-	if pricePayed > 0 {
-		_, err = db.CreateTrans(
-			"Entree",
-			pricePayed, // Use pricePayed (the amount actually received in cash)
-			fmt.Sprintf("Vente - Montant reçu: %.2f %s", pricePayed, currency),
-			currency,
-			operatorID,
-			storeID,
-			&date,
-		)
-		if err != nil {
-			// Log error but don't fail the sale creation
-			// The sale is already created, we just log the caisse transaction error
-		}
-	}
-
-	// Automatically create stock movements (SORTIE) for each product in the sale
-	for _, item := range basket {
-		// Get product in stock to find the product template ID
-		productInStock, err := db.FindProductInStockByID(item.ProductInStockID.Hex())
-		if err != nil {
-			utils.LogError(err, fmt.Sprintf("Error finding product in stock %s", item.ProductInStockID.Hex()))
-			continue
+		// 2. Create sale (within transaction)
+		sale = &Sale{
+			ID:          primitive.NewObjectID(),
+			Basket:      basket,
+			PriceToPay:  priceToPay,
+			PricePayed:  pricePayed,
+			Currency:    currency,
+			ClientID:    clientID,
+			OperatorID:  operatorID,
+			StoreID:     storeID,
+			PaymentType: paymentType,
+			AmountDue:   amountDue,
+			DebtStatus:  debtStatus,
+			Date:        date,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
 		}
 
-		// Create stock movement using the product template ID
-		_, err = db.CreateStockMovement(
-			productInStock.ProductID.Hex(),
-			storeID.Hex(),
-			StockMovementTypeSortie,
-			item.Quantity,
-			item.Price,
-			currency,
-			operatorID,
-			fmt.Sprintf("Vente #%s", sale.ID.Hex()),
-			fmt.Sprintf("sale-%s", sale.ID.Hex()),
-			"SALE",
-			&sale.ID,
-		)
+		_, err = saleCollection.InsertOne(sc, sale)
 		if err != nil {
-			// Log error but don't fail the sale creation
-			utils.LogError(err, fmt.Sprintf("Error creating stock movement for product %s", productInStock.ProductID.Hex()))
+			return utils.DatabaseErrorf("create_sale", "Error creating sale: %v", err)
 		}
+
+		// 3. Create debt if payment type is debt or advance and there's an amount due (within transaction)
+		if (paymentType == "debt" || paymentType == "advance") && amountDue > 0 && clientID != nil {
+			// Determine status
+			status := "unpaid"
+			if amountDue <= 0 {
+				status = "paid"
+			} else if pricePayed > 0 {
+				status = "partial"
+			}
+
+			now := time.Now()
+			var paidAt *time.Time
+			if status == "paid" {
+				paidAt = &now
+			}
+
+			debt := Debt{
+				ID:          primitive.NewObjectID(),
+				SaleID:      sale.ID,
+				ClientID:    *clientID,
+				StoreID:     storeID,
+				TotalAmount: priceToPay,
+				AmountPaid:  pricePayed,
+				AmountDue:   amountDue,
+				Currency:    currency,
+				Status:      status,
+				PaymentType: paymentType,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+				PaidAt:      paidAt,
+			}
+
+			_, err = debtCollection.InsertOne(sc, debt)
+			if err != nil {
+				return utils.DatabaseErrorf("create_debt", "Error creating debt: %v", err)
+			}
+
+			// Update sale with debt ID
+			_, err = saleCollection.UpdateOne(
+				sc,
+				bson.M{"_id": sale.ID},
+				bson.M{"$set": bson.M{"debtId": debt.ID}},
+			)
+			if err != nil {
+				return utils.DatabaseErrorf("update_sale_debt", "Error updating sale with debt ID: %v", err)
+			}
+
+			sale.DebtID = &debt.ID
+		}
+
+		// 4. Create caisse transaction if money was received (within transaction)
+		if pricePayed > 0 {
+			trans := Trans{
+				ID:          primitive.NewObjectID(),
+				Amount:      pricePayed,
+				Operation:   "Entree",
+				Description: fmt.Sprintf("Vente - Montant reçu: %.2f %s", pricePayed, currency),
+				Currency:    currency,
+				OperatorID:  operatorID,
+				StoreID:     storeID,
+				Date:        date,
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}
+
+			_, err = transCollection.InsertOne(sc, trans)
+			if err != nil {
+				return utils.DatabaseErrorf("create_caisse_transaction", "Error creating caisse transaction: %v", err)
+			}
+		}
+
+		// 5. Create stock movements for each product (within transaction)
+		for _, item := range basket {
+			// Find the corresponding product info
+			var productInfo *ProductInStock
+			for _, info := range productInfos {
+				if info.productInStock.ID == item.ProductInStockID {
+					productInfo = info.productInStock
+					break
+				}
+			}
+			if productInfo == nil {
+				return utils.NotFoundErrorf("Product info not found for product in stock %s", item.ProductInStockID.Hex())
+			}
+
+			// Calculate total value
+			totalValue := item.Quantity * item.Price
+
+			movement := StockMovement{
+				ID:            primitive.NewObjectID(),
+				ProductID:     productInfo.ProductID,
+				StoreID:       storeID,
+				Type:          StockMovementTypeSortie,
+				Quantity:      item.Quantity,
+				UnitPrice:     item.Price,
+				TotalValue:    totalValue,
+				Currency:      currency,
+				Reason:        fmt.Sprintf("Vente #%s", sale.ID.Hex()),
+				Reference:     fmt.Sprintf("sale-%s", sale.ID.Hex()),
+				ReferenceType: "SALE",
+				ReferenceID:   &sale.ID,
+				OperatorID:    operatorID,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+			}
+
+			_, err = stockMovementCollection.InsertOne(sc, movement)
+			if err != nil {
+				return utils.DatabaseErrorf("create_stock_movement", "Error creating stock movement for product %s: %v", productInfo.ProductID.Hex(), err)
+			}
+		}
+
+		// Commit transaction
+		if err := session.CommitTransaction(sc); err != nil {
+			return utils.DatabaseErrorf("commit_transaction", "Error committing transaction: %v", err)
+		}
+
+		return nil
+	})
+
+	// Handle transaction errors
+	// MongoDB automatically aborts the transaction if an error occurs in WithSession
+	if err != nil {
+		return nil, err
 	}
 
-	return &sale, nil
+	return sale, nil
 }
 
 // getPeriodDateRange calculates start and end dates based on period string
@@ -246,14 +340,14 @@ func getPeriodDateRange(period *string, startDateStr, endDateStr *string) (start
 
 	if startDateStr != nil && endDateStr != nil {
 		// Use provided date range
-		start, err = time.Parse("2006-01-02", *startDateStr)
-		if err != nil {
-			// Try RFC3339 format
-			start, err = time.Parse(time.RFC3339, *startDateStr)
+			start, err = time.Parse("2006-01-02", *startDateStr)
 			if err != nil {
-				return time.Time{}, time.Time{}, gqlerror.Errorf("Invalid start date format")
+				// Try RFC3339 format
+				start, err = time.Parse(time.RFC3339, *startDateStr)
+				if err != nil {
+					return time.Time{}, time.Time{}, utils.ValidationErrorf("Invalid start date format")
+				}
 			}
-		}
 		start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
 
 		end, err = time.Parse("2006-01-02", *endDateStr)
@@ -261,7 +355,7 @@ func getPeriodDateRange(period *string, startDateStr, endDateStr *string) (start
 			// Try RFC3339 format
 			end, err = time.Parse(time.RFC3339, *endDateStr)
 			if err != nil {
-				return time.Time{}, time.Time{}, gqlerror.Errorf("Invalid end date format")
+				return time.Time{}, time.Time{}, utils.ValidationErrorf("Invalid end date format")
 			}
 		}
 		// Set end date to end of day
@@ -324,8 +418,8 @@ func (db *DB) FindSalesByStoreIDsWithFilters(
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	// Build filter
-	filter := bson.M{"storeId": bson.M{"$in": storeIDs}}
+	// Build filter (exclude deleted sales)
+	filter := bson.M{"storeId": bson.M{"$in": storeIDs}, "deletedAt": nil}
 
 	// Add currency filter
 	if currency != nil {
@@ -375,13 +469,13 @@ func (db *DB) FindSalesByStoreIDsWithFilters(
 
 	cursor, err := saleCollection.Find(ctx, filter, opts)
 	if err != nil {
-		return nil, gqlerror.Errorf("Error finding sales: %v", err)
+		return nil, utils.DatabaseErrorf("find_sales", "Error finding sales: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var sales []*Sale
 	if err = cursor.All(ctx, &sales); err != nil {
-		return nil, gqlerror.Errorf("Error decoding sales: %v", err)
+		return nil, utils.DatabaseErrorf("decode_sales", "Error decoding sales: %v", err)
 	}
 
 	return sales, nil
@@ -469,13 +563,13 @@ func (db *DB) FindSalesListByStoreIDsWithFilters(
 
 	cursor, err := saleCollection.Find(ctx, filter, opts)
 	if err != nil {
-		return nil, gqlerror.Errorf("Error finding sales list: %v", err)
+		return nil, utils.DatabaseErrorf("find_sales_list", "Error finding sales list: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var sales []*Sale
 	if err = cursor.All(ctx, &sales); err != nil {
-		return nil, gqlerror.Errorf("Error decoding sales list: %v", err)
+		return nil, utils.DatabaseErrorf("decode_sales_list", "Error decoding sales list: %v", err)
 	}
 
 	return sales, nil
@@ -527,7 +621,7 @@ func (db *DB) CountSalesByStoreIDs(
 
 	count, err := saleCollection.CountDocuments(ctx, filter)
 	if err != nil {
-		return 0, gqlerror.Errorf("Error counting sales: %v", err)
+		return 0, utils.DatabaseErrorf("count_sales", "Error counting sales: %v", err)
 	}
 
 	return count, nil
@@ -558,8 +652,8 @@ func (db *DB) GetSalesStatsByStoreIDs(
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	// Build match filter
-	matchFilter := bson.M{"storeId": bson.M{"$in": storeIDs}}
+	// Build match filter (exclude deleted sales)
+	matchFilter := bson.M{"storeId": bson.M{"$in": storeIDs}, "deletedAt": nil}
 
 	// Add currency filter
 	if currency != nil {
@@ -618,13 +712,13 @@ func (db *DB) GetSalesStatsByStoreIDs(
 
 	cursor, err := saleCollection.Aggregate(ctx, pipeline)
 	if err != nil {
-		return nil, gqlerror.Errorf("Error aggregating sales stats: %v", err)
+		return nil, utils.DatabaseErrorf("aggregate_sales_stats", "Error aggregating sales stats: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var results []bson.M
 	if err = cursor.All(ctx, &results); err != nil {
-		return nil, gqlerror.Errorf("Error decoding sales stats: %v", err)
+		return nil, utils.DatabaseErrorf("decode_sales_stats", "Error decoding sales stats: %v", err)
 	}
 
 	stats := &SaleStats{}
@@ -671,8 +765,8 @@ func (db *DB) CalculateTotalBeneficeByStoreIDs(
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	// Build match filter
-	matchFilter := bson.M{"storeId": bson.M{"$in": storeIDs}}
+	// Build match filter (exclude deleted sales)
+	matchFilter := bson.M{"storeId": bson.M{"$in": storeIDs}, "deletedAt": nil}
 
 	// Add currency filter
 	if currency != nil {
@@ -744,13 +838,13 @@ func (db *DB) CalculateTotalBeneficeByStoreIDs(
 
 	cursor, err := saleCollection.Aggregate(ctx, pipeline)
 	if err != nil {
-		return 0, gqlerror.Errorf("Error calculating total benefice: %v", err)
+		return 0, utils.DatabaseErrorf("calculate_benefice", "Error calculating total benefice: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var results []bson.M
 	if err = cursor.All(ctx, &results); err != nil {
-		return 0, gqlerror.Errorf("Error decoding benefice results: %v", err)
+		return 0, utils.DatabaseErrorf("decode_benefice", "Error decoding benefice results: %v", err)
 	}
 
 	// Extract total benefice from results
@@ -770,7 +864,7 @@ func (db *DB) CalculateTotalBeneficeByStoreIDs(
 func (db *DB) FindSaleByID(id string) (*Sale, error) {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		return nil, gqlerror.Errorf("Invalid sale ID")
+		return nil, utils.ValidationErrorf("Invalid sale ID")
 	}
 
 	saleCollection := colHelper(db, "sales")
@@ -778,12 +872,12 @@ func (db *DB) FindSaleByID(id string) (*Sale, error) {
 	defer cancel()
 
 	var sale Sale
-	err = saleCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&sale)
+	err = saleCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&sale)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, gqlerror.Errorf("Sale not found")
+			return nil, utils.NotFoundErrorf("Sale not found")
 		}
-		return nil, gqlerror.Errorf("Error finding sale: %v", err)
+		return nil, utils.DatabaseErrorf("find_sale", "Error finding sale: %v", err)
 	}
 
 	return &sale, nil
@@ -795,35 +889,55 @@ func (db *DB) FindSalesByClientID(clientID primitive.ObjectID) ([]*Sale, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cursor, err := saleCollection.Find(ctx, bson.M{"clientId": clientID})
+	cursor, err := saleCollection.Find(ctx, bson.M{"clientId": clientID, "deletedAt": nil})
 	if err != nil {
-		return nil, gqlerror.Errorf("Error finding sales: %v", err)
+		return nil, utils.DatabaseErrorf("find_sales_by_client", "Error finding sales: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var sales []*Sale
 	if err = cursor.All(ctx, &sales); err != nil {
-		return nil, gqlerror.Errorf("Error decoding sales: %v", err)
+		return nil, utils.DatabaseErrorf("decode_sales_by_client", "Error decoding sales: %v", err)
 	}
 
 	return sales, nil
 }
 
-// DeleteSale deletes a sale entry
-func (db *DB) DeleteSale(id string) error {
+// SoftDeleteSale marks a sale as deleted (soft delete)
+func (db *DB) SoftDeleteSale(id string) error {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		return gqlerror.Errorf("Invalid sale ID")
+		return utils.ValidationErrorf("Invalid sale ID")
 	}
 
 	saleCollection := colHelper(db, "sales")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err = saleCollection.DeleteOne(ctx, bson.M{"_id": objectID})
+	// Check if sale exists and is not already deleted
+	var sale Sale
+	err = saleCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&sale)
 	if err != nil {
-		return gqlerror.Errorf("Error deleting sale: %v", err)
+		return utils.NotFoundErrorf("Sale not found or already deleted")
+	}
+
+	// Soft delete: set deletedAt
+	now := time.Now()
+	_, err = saleCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"deletedAt": now,
+			"updatedAt": now,
+		},
+	})
+	if err != nil {
+		return utils.DatabaseErrorf("soft_delete_sale", "Error soft deleting sale: %v", err)
 	}
 
 	return nil
+}
+
+// DeleteSale is kept for backward compatibility but now uses soft delete
+// Deprecated: Use SoftDeleteSale instead
+func (db *DB) DeleteSale(id string) error {
+	return db.SoftDeleteSale(id)
 }

@@ -128,9 +128,9 @@ func (r *mutationResolver) CreateUser(ctx context.Context, input model.CreateUse
 		return nil, err
 	}
 	// Get current user from context
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can create users
@@ -198,9 +198,9 @@ func (r *mutationResolver) UpdateUser(ctx context.Context, id string, input mode
 	if err := validators.ValidateUpdateUserInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can update users
@@ -234,9 +234,9 @@ func (r *mutationResolver) UpdateUser(ctx context.Context, id string, input mode
 
 // DeleteUser is the resolver for the deleteUser field.
 func (r *mutationResolver) DeleteUser(ctx context.Context, id string) (bool, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Only Admin can delete users
@@ -257,9 +257,9 @@ func (r *mutationResolver) BlockUser(ctx context.Context, id string) (*model.Use
 	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can block users
@@ -280,9 +280,9 @@ func (r *mutationResolver) UnblockUser(ctx context.Context, id string) (*model.U
 	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can unblock users
@@ -306,9 +306,9 @@ func (r *mutationResolver) AssignUserToStore(ctx context.Context, userID string,
 	if err := validators.ValidateObjectID(storeID, "Store ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can assign users to stores
@@ -335,9 +335,9 @@ func (r *mutationResolver) ChangePassword(ctx context.Context, input model.Chang
 		return false, err
 	}
 
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Users can only change their own password
@@ -354,9 +354,9 @@ func (r *mutationResolver) CreateCompany(ctx context.Context, input model.Create
 	if err := validators.ValidateCreateCompanyInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if user already has a company
@@ -403,9 +403,9 @@ func (r *mutationResolver) UpdateCompany(ctx context.Context, input model.Update
 	if err := validators.ValidateUpdateCompanyInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can update company
@@ -435,9 +435,9 @@ func (r *mutationResolver) UpdateCompany(ctx context.Context, input model.Update
 
 // DeleteCompany is the resolver for the deleteCompany field.
 func (r *mutationResolver) DeleteCompany(ctx context.Context) (bool, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Only Admin can delete company
@@ -468,9 +468,9 @@ func (r *mutationResolver) DeleteCompany(ctx context.Context) (bool, error) {
 
 // UpdateExchangeRates is the resolver for the updateExchangeRates field.
 func (r *mutationResolver) UpdateExchangeRates(ctx context.Context, rates []*model.ExchangeRateInput) (*model.Company, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can update exchange rates
@@ -512,9 +512,9 @@ func (r *mutationResolver) CreateStore(ctx context.Context, input model.CreateSt
 	if err := validators.ValidateCreateStoreInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can create stores
@@ -584,9 +584,9 @@ func (r *mutationResolver) UpdateStore(ctx context.Context, id string, input mod
 	if err := validators.ValidateUpdateStoreInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can update stores
@@ -623,15 +623,17 @@ func (r *mutationResolver) DeleteStore(ctx context.Context, id string) (bool, er
 	if err := validators.ValidateObjectID(id, "Store ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Only Admin can delete stores
-	if currentUser.Role != "Admin" {
-		return false, gqlerror.Errorf("Only Admin can delete stores")
+	if err := r.RequireAdmin(ctx); err != nil {
+		return false, err
 	}
+	// Re-get user after RequireAdmin check (we know it's valid from RequireAdmin)
+	currentUser, _ = r.RequireAuthenticated(ctx)
 
 	// Verify store access
 	hasAccess, err := r.DB.VerifyStoreAccess(id, currentUser.CompanyID.Hex())
@@ -652,9 +654,8 @@ func (r *mutationResolver) CreateProduct(ctx context.Context, input model.Create
 	if err := validators.ValidateCreateProductInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -663,9 +664,8 @@ func (r *mutationResolver) CreateProduct(ctx context.Context, input model.Create
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -693,9 +693,8 @@ func (r *mutationResolver) UpdateProduct(ctx context.Context, id string, input m
 	if err := validators.ValidateUpdateProductInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	// Get product to verify store access
@@ -704,9 +703,8 @@ func (r *mutationResolver) UpdateProduct(ctx context.Context, id string, input m
 		return nil, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, product.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this product's store")
+	if err := r.RequireStoreAccessFromProduct(ctx, product); err != nil {
+		return nil, err
 	}
 
 	updatedProduct, err := r.DB.UpdateProduct(
@@ -726,9 +724,8 @@ func (r *mutationResolver) DeleteProduct(ctx context.Context, id string) (bool, 
 	if err := validators.ValidateObjectID(id, "Product ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return false, err
 	}
 
 	// Get product to verify store access
@@ -737,9 +734,8 @@ func (r *mutationResolver) DeleteProduct(ctx context.Context, id string) (bool, 
 		return false, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, product.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return false, gqlerror.Errorf("You don't have access to this product's store")
+	if err := r.RequireStoreAccessFromProduct(ctx, product); err != nil {
+		return false, err
 	}
 
 	err = r.DB.DeleteProduct(id)
@@ -752,9 +748,9 @@ func (r *mutationResolver) DeleteProduct(ctx context.Context, id string) (bool, 
 
 // SupplyStock is the resolver for the supplyStock field.
 func (r *mutationResolver) SupplyStock(ctx context.Context, input model.StockSupplyInput) (*model.StockSupply, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate input
@@ -784,9 +780,8 @@ func (r *mutationResolver) SupplyStock(ctx context.Context, input model.StockSup
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	// Convert IDs
@@ -930,9 +925,8 @@ func (r *mutationResolver) CreateClient(ctx context.Context, input model.CreateC
 	if err := validators.ValidateCreateClientInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -941,9 +935,8 @@ func (r *mutationResolver) CreateClient(ctx context.Context, input model.CreateC
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -967,9 +960,8 @@ func (r *mutationResolver) UpdateClient(ctx context.Context, id string, input mo
 	if err := validators.ValidateUpdateClientInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	// Get client to verify store access
@@ -978,9 +970,8 @@ func (r *mutationResolver) UpdateClient(ctx context.Context, id string, input mo
 		return nil, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, client.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this client's store")
+	if err := r.RequireStoreAccessFromClient(ctx, client); err != nil {
+		return nil, err
 	}
 
 	updatedClient, err := r.DB.UpdateClient(id, input.Name, input.Phone, input.CreditLimit)
@@ -996,9 +987,8 @@ func (r *mutationResolver) DeleteClient(ctx context.Context, id string) (bool, e
 	if err := validators.ValidateObjectID(id, "Client ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return false, err
 	}
 
 	// Get client to verify store access
@@ -1007,9 +997,8 @@ func (r *mutationResolver) DeleteClient(ctx context.Context, id string) (bool, e
 		return false, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, client.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return false, gqlerror.Errorf("You don't have access to this client's store")
+	if err := r.RequireStoreAccessFromClient(ctx, client); err != nil {
+		return false, err
 	}
 
 	err = r.DB.DeleteClient(id)
@@ -1025,15 +1014,17 @@ func (r *mutationResolver) UpdateClientCreditLimit(ctx context.Context, clientID
 	if err := validators.ValidateObjectID(clientID, "Client ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Seuls les admins peuvent modifier les limites de crédit
-	if currentUser.Role != "Admin" {
-		return nil, gqlerror.Errorf("Only admins can update credit limits")
+	if err := r.RequireAdmin(ctx); err != nil {
+		return nil, err
 	}
+	// Re-get user after RequireAdmin check (we know it's valid from RequireAdmin)
+	currentUser, _ = r.RequireAuthenticated(ctx)
 
 	// Get client to verify store access
 	client, err := r.DB.FindClientByID(clientID)
@@ -1065,9 +1056,8 @@ func (r *mutationResolver) CreateProvider(ctx context.Context, input model.Creat
 	if err := validators.ValidateCreateProviderInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -1076,9 +1066,8 @@ func (r *mutationResolver) CreateProvider(ctx context.Context, input model.Creat
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -1102,9 +1091,8 @@ func (r *mutationResolver) UpdateProvider(ctx context.Context, id string, input 
 	if err := validators.ValidateUpdateProviderInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	// Get provider to verify store access
@@ -1113,9 +1101,8 @@ func (r *mutationResolver) UpdateProvider(ctx context.Context, id string, input 
 		return nil, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, provider.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this provider's store")
+	if err := r.RequireStoreAccess(ctx, provider.StoreID.Hex()); err != nil {
+		return nil, err
 	}
 
 	updatedProvider, err := r.DB.UpdateProvider(id, input.Name, input.Phone, input.Address)
@@ -1131,9 +1118,8 @@ func (r *mutationResolver) DeleteProvider(ctx context.Context, id string) (bool,
 	if err := validators.ValidateObjectID(id, "Provider ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return false, err
 	}
 
 	// Get provider to verify store access
@@ -1142,9 +1128,8 @@ func (r *mutationResolver) DeleteProvider(ctx context.Context, id string) (bool,
 		return false, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, provider.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return false, gqlerror.Errorf("You don't have access to this provider's store")
+	if err := r.RequireStoreAccess(ctx, provider.StoreID.Hex()); err != nil {
+		return false, err
 	}
 
 	err = r.DB.DeleteProvider(id)
@@ -1160,9 +1145,9 @@ func (r *mutationResolver) CreateFacture(ctx context.Context, input model.Create
 	if err := validators.ValidateCreateFactureInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -1171,9 +1156,8 @@ func (r *mutationResolver) CreateFacture(ctx context.Context, input model.Create
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -1295,9 +1279,9 @@ func (r *mutationResolver) UpdateFacture(ctx context.Context, id string, input m
 	if err := validators.ValidateUpdateFactureInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get facture to verify store access
@@ -1306,9 +1290,8 @@ func (r *mutationResolver) UpdateFacture(ctx context.Context, id string, input m
 		return nil, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, facture.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this facture's store")
+	if err := r.RequireStoreAccess(ctx, facture.StoreID.Hex()); err != nil {
+		return nil, err
 	}
 
 	var factureProducts []database.FactureProduct
@@ -1370,9 +1353,9 @@ func (r *mutationResolver) DeleteFacture(ctx context.Context, id string) (bool, 
 	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Get facture to verify store access
@@ -1399,9 +1382,9 @@ func (r *mutationResolver) CreateRapportStore(ctx context.Context, input model.C
 	if err := validators.ValidateCreateRapportStoreInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -1410,9 +1393,8 @@ func (r *mutationResolver) CreateRapportStore(ctx context.Context, input model.C
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -1479,9 +1461,9 @@ func (r *mutationResolver) DeleteRapportStore(ctx context.Context, id string) (b
 	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Get rapport to verify store access
@@ -1508,9 +1490,9 @@ func (r *mutationResolver) CreateCaisseTransaction(ctx context.Context, input mo
 	if err := validators.ValidateCreateCaisseTransactionInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -1519,9 +1501,8 @@ func (r *mutationResolver) CreateCaisseTransaction(ctx context.Context, input mo
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -1589,9 +1570,9 @@ func (r *mutationResolver) DeleteCaisseTransaction(ctx context.Context, id strin
 	if err := validators.ValidateObjectID(id, "Transaction ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Verify transaction exists and user has access
@@ -1619,9 +1600,9 @@ func (r *mutationResolver) CreateSale(ctx context.Context, input model.CreateSal
 	if err := validators.ValidateCreateSaleInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -1630,9 +1611,8 @@ func (r *mutationResolver) CreateSale(ctx context.Context, input model.CreateSal
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -1753,9 +1733,9 @@ func (r *mutationResolver) DeleteSale(ctx context.Context, id string) (bool, err
 	if err := validators.ValidateObjectID(id, "Sale ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	// Verify sale exists and user has access
@@ -1783,9 +1763,9 @@ func (r *mutationResolver) CreateFactureFromSale(ctx context.Context, saleID str
 	if err := validators.ValidateObjectID(saleID, "Sale ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get sale
@@ -1860,9 +1840,9 @@ func (r *mutationResolver) PayDebt(ctx context.Context, debtID string, amount fl
 		return nil, gqlerror.Errorf("Description is required")
 	}
 
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get debt to verify store access
@@ -1891,9 +1871,9 @@ func (r *mutationResolver) PayProviderDebt(ctx context.Context, providerDebtID s
 	if err := validators.ValidateObjectID(providerDebtID, "Provider Debt ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get provider debt to verify store access
@@ -1931,9 +1911,9 @@ func (r *mutationResolver) CreateInventory(ctx context.Context, input model.Crea
 		return nil, err
 	}
 
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Vérifier l'abonnement
@@ -1942,9 +1922,8 @@ func (r *mutationResolver) CreateInventory(ctx context.Context, input model.Crea
 	}
 
 	// Verify store access
-	hasAccess, err := r.HasStoreAccess(ctx, input.StoreID)
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this store")
+	if err := r.RequireStoreAccess(ctx, input.StoreID); err != nil {
+		return nil, err
 	}
 
 	storeID, err := primitive.ObjectIDFromHex(input.StoreID)
@@ -1975,9 +1954,9 @@ func (r *mutationResolver) AddInventoryItem(ctx context.Context, input model.Add
 		return nil, err
 	}
 
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get inventory to verify access
@@ -2016,9 +1995,9 @@ func (r *mutationResolver) CompleteInventory(ctx context.Context, inventoryID st
 		return nil, err
 	}
 
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get inventory to verify access
@@ -2047,9 +2026,9 @@ func (r *mutationResolver) CancelInventory(ctx context.Context, inventoryID stri
 		return nil, err
 	}
 
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get inventory to verify access
@@ -2074,9 +2053,9 @@ func (r *mutationResolver) CancelInventory(ctx context.Context, inventoryID stri
 
 // CreateSubscription is the resolver for the createSubscription field.
 func (r *mutationResolver) CreateSubscription(ctx context.Context, plan string, paymentMethod string, paymentID string) (*model.CompanySubscription, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if currentUser.CompanyID == primitive.NilObjectID {
@@ -2099,9 +2078,9 @@ func (r *mutationResolver) CreateSubscription(ctx context.Context, plan string, 
 
 // UpgradeSubscription is the resolver for the upgradeSubscription field.
 func (r *mutationResolver) UpgradeSubscription(ctx context.Context, plan string, paymentMethod string, paymentID string) (*model.CompanySubscription, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if currentUser.CompanyID == primitive.NilObjectID {
@@ -2124,9 +2103,9 @@ func (r *mutationResolver) UpgradeSubscription(ctx context.Context, plan string,
 
 // CancelSubscription is the resolver for the cancelSubscription field.
 func (r *mutationResolver) CancelSubscription(ctx context.Context) (bool, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return false, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	if currentUser.CompanyID == primitive.NilObjectID {
@@ -2158,9 +2137,9 @@ func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
 
 // Users is the resolver for the users field.
 func (r *queryResolver) Users(ctx context.Context) ([]*model.User, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Only Admin can see all users
@@ -2191,9 +2170,9 @@ func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error
 	if err := validators.ValidateObjectID(id, "User ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	user, err := r.DB.FindUserByID(id)
@@ -2211,9 +2190,9 @@ func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error
 
 // Company is the resolver for the company field.
 func (r *queryResolver) Company(ctx context.Context) (*model.Company, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if user has a company
@@ -2231,9 +2210,9 @@ func (r *queryResolver) Company(ctx context.Context) (*model.Company, error) {
 
 // ExchangeRates is the resolver for the exchangeRates field.
 func (r *queryResolver) ExchangeRates(ctx context.Context) ([]*model.ExchangeRate, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify that the user has a company
@@ -2284,9 +2263,9 @@ func (r *queryResolver) ConvertCurrency(ctx context.Context, amount float64, fro
 
 // Subscription is the resolver for the subscription field.
 func (r *queryResolver) Subscription(ctx context.Context) (*model.CompanySubscription, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if currentUser.CompanyID == primitive.NilObjectID {
@@ -2304,9 +2283,9 @@ func (r *queryResolver) Subscription(ctx context.Context) (*model.CompanySubscri
 
 // CheckSubscriptionStatus is the resolver for the checkSubscriptionStatus field.
 func (r *queryResolver) CheckSubscriptionStatus(ctx context.Context) (*model.SubscriptionStatus, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if currentUser.CompanyID == primitive.NilObjectID {
@@ -2371,9 +2350,9 @@ func (r *queryResolver) SubscriptionPlan(ctx context.Context, id string) (*model
 
 // Stores is the resolver for the stores field.
 func (r *queryResolver) Stores(ctx context.Context) ([]*model.Store, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if user has a company
@@ -2411,9 +2390,9 @@ func (r *queryResolver) Store(ctx context.Context, id string) (*model.Store, err
 	if err := validators.ValidateObjectID(id, "Store ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify store access
@@ -2432,9 +2411,9 @@ func (r *queryResolver) Store(ctx context.Context, id string) (*model.Store, err
 
 // Products is the resolver for the products field.
 func (r *queryResolver) Products(ctx context.Context, storeID *string) ([]*model.Product, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2477,9 +2456,9 @@ func (r *queryResolver) Product(ctx context.Context, id string) (*model.Product,
 	if err := validators.ValidateObjectID(id, "Product ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	product, err := r.DB.FindProductByID(id)
@@ -2498,9 +2477,9 @@ func (r *queryResolver) Product(ctx context.Context, id string) (*model.Product,
 
 // ProductsInStock is the resolver for the productsInStock field.
 func (r *queryResolver) ProductsInStock(ctx context.Context, storeID *string, productID *string, providerID *string) ([]*model.ProductInStock, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2547,9 +2526,9 @@ func (r *queryResolver) ProductInStock(ctx context.Context, id string) (*model.P
 	if err := validators.ValidateObjectID(id, "Product In Stock ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	productInStock, err := r.DB.FindProductInStockByID(id)
@@ -2567,9 +2546,9 @@ func (r *queryResolver) ProductInStock(ctx context.Context, id string) (*model.P
 
 // StockSupplies is the resolver for the stockSupplies field.
 func (r *queryResolver) StockSupplies(ctx context.Context, storeID *string, productID *string, providerID *string) ([]*model.StockSupply, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2616,9 +2595,9 @@ func (r *queryResolver) StockSupply(ctx context.Context, id string) (*model.Stoc
 	if err := validators.ValidateObjectID(id, "Stock Supply ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	supply, err := r.DB.FindStockSupplyByID(id)
@@ -2636,9 +2615,9 @@ func (r *queryResolver) StockSupply(ctx context.Context, id string) (*model.Stoc
 
 // ProviderDebts is the resolver for the providerDebts field.
 func (r *queryResolver) ProviderDebts(ctx context.Context, storeID *string, providerID *string, status *string) ([]*model.ProviderDebt, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2684,9 +2663,9 @@ func (r *queryResolver) ProviderDebt(ctx context.Context, id string) (*model.Pro
 	if err := validators.ValidateObjectID(id, "Provider Debt ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	debt, err := r.DB.GetProviderDebtByID(id)
@@ -2704,9 +2683,9 @@ func (r *queryResolver) ProviderDebt(ctx context.Context, id string) (*model.Pro
 
 // Clients is the resolver for the clients field.
 func (r *queryResolver) Clients(ctx context.Context, storeID *string) ([]*model.Client, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2743,9 +2722,9 @@ func (r *queryResolver) Client(ctx context.Context, id string) (*model.Client, e
 	if err := validators.ValidateObjectID(id, "Client ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := r.DB.FindClientByID(id)
@@ -2763,9 +2742,9 @@ func (r *queryResolver) Client(ctx context.Context, id string) (*model.Client, e
 
 // Providers is the resolver for the providers field.
 func (r *queryResolver) Providers(ctx context.Context, storeID *string) ([]*model.Provider, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2802,9 +2781,9 @@ func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provide
 	if err := validators.ValidateObjectID(id, "Provider ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	provider, err := r.DB.FindProviderByID(id)
@@ -2812,9 +2791,8 @@ func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provide
 		return nil, err
 	}
 
-	hasAccess, err := r.HasStoreAccess(ctx, provider.StoreID.Hex())
-	if err != nil || !hasAccess {
-		return nil, gqlerror.Errorf("You don't have access to this provider's store")
+	if err := r.RequireStoreAccess(ctx, provider.StoreID.Hex()); err != nil {
+		return nil, err
 	}
 
 	return convertProviderToGraphQL(provider, r.DB), nil
@@ -2822,9 +2800,9 @@ func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provide
 
 // Factures is the resolver for the factures field.
 func (r *queryResolver) Factures(ctx context.Context, storeID *string) ([]*model.Facture, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2861,9 +2839,9 @@ func (r *queryResolver) Facture(ctx context.Context, id string) (*model.Facture,
 	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	facture, err := r.DB.FindFactureByID(id)
@@ -2881,9 +2859,9 @@ func (r *queryResolver) Facture(ctx context.Context, id string) (*model.Facture,
 
 // RapportStore is the resolver for the rapportStore field.
 func (r *queryResolver) RapportStore(ctx context.Context, storeID *string) ([]*model.RapportStore, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2920,9 +2898,9 @@ func (r *queryResolver) RapportStoreByID(ctx context.Context, id string) (*model
 	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	rapport, err := r.DB.FindRapportStoreByID(id)
@@ -2940,9 +2918,9 @@ func (r *queryResolver) RapportStoreByID(ctx context.Context, id string) (*model
 
 // Caisse is the resolver for the caisse field.
 func (r *queryResolver) Caisse(ctx context.Context, storeID *string, currency *string, period *string) (*model.Caisse, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -2988,9 +2966,9 @@ func (r *queryResolver) Caisse(ctx context.Context, storeID *string, currency *s
 
 // CaisseTransactions is the resolver for the caisseTransactions field.
 func (r *queryResolver) CaisseTransactions(ctx context.Context, storeID *string, currency *string, period *string, limit *int) ([]*model.CaisseTransaction, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -3036,9 +3014,9 @@ func (r *queryResolver) CaisseTransaction(ctx context.Context, id string) (*mode
 	if err := validators.ValidateObjectID(id, "Transaction ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	trans, err := r.DB.FindTransByID(id)
@@ -3057,9 +3035,9 @@ func (r *queryResolver) CaisseTransaction(ctx context.Context, id string) (*mode
 
 // CaisseRapport is the resolver for the caisseRapport field.
 func (r *queryResolver) CaisseRapport(ctx context.Context, storeID *string, currency *string, period *string, startDate *string, endDate *string) (*model.CaisseRapport, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDStr *string
@@ -3091,9 +3069,9 @@ func (r *queryResolver) CaisseRapport(ctx context.Context, storeID *string, curr
 
 // Sales is the resolver for the sales field.
 func (r *queryResolver) Sales(ctx context.Context, storeID *string, limit *int, offset *int, period *string, startDate *string, endDate *string, currency *string) ([]*model.Sale, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -3137,9 +3115,9 @@ func (r *queryResolver) Sales(ctx context.Context, storeID *string, limit *int, 
 
 // SalesList is the resolver for the salesList field.
 func (r *queryResolver) SalesList(ctx context.Context, storeID *string, limit *int, offset *int, period *string, startDate *string, endDate *string, currency *string) ([]*model.SaleList, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -3226,9 +3204,9 @@ func (r *queryResolver) SalesCount(ctx context.Context, storeID *string, period 
 
 // SalesStats is the resolver for the salesStats field.
 func (r *queryResolver) SalesStats(ctx context.Context, storeID *string, period *string, startDate *string, endDate *string, currency *string) (*model.SalesStats, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -3289,9 +3267,9 @@ func (r *queryResolver) Sale(ctx context.Context, id string) (*model.Sale, error
 	if err := validators.ValidateObjectID(id, "Sale ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	sale, err := r.DB.FindSaleByID(id)
@@ -3310,9 +3288,9 @@ func (r *queryResolver) Sale(ctx context.Context, id string) (*model.Sale, error
 
 // Debts is the resolver for the debts field.
 func (r *queryResolver) Debts(ctx context.Context, storeID *string, status *string) ([]*model.Debt, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -3353,9 +3331,9 @@ func (r *queryResolver) Debt(ctx context.Context, id string) (*model.Debt, error
 	if err := validators.ValidateObjectID(id, "Debt ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	debt, err := r.DB.GetDebtByID(id)
@@ -3377,9 +3355,9 @@ func (r *queryResolver) ClientDebts(ctx context.Context, clientID string, storeI
 	if err := validators.ValidateObjectID(clientID, "Client ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify client exists and access
@@ -3414,9 +3392,9 @@ func (r *queryResolver) ClientDebts(ctx context.Context, clientID string, storeI
 
 // Inventories is the resolver for the inventories field.
 func (r *queryResolver) Inventories(ctx context.Context, storeID *string, status *string) ([]*model.Inventory, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
@@ -3457,9 +3435,9 @@ func (r *queryResolver) Inventory(ctx context.Context, id string) (*model.Invent
 	if err := validators.ValidateObjectID(id, "Inventory ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	inventory, err := r.DB.GetInventoryByID(id)
@@ -3481,9 +3459,9 @@ func (r *queryResolver) ActiveInventory(ctx context.Context, storeID string) (*m
 	if err := validators.ValidateObjectID(storeID, "Store ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify store access
@@ -3506,9 +3484,9 @@ func (r *queryResolver) ActiveInventory(ctx context.Context, storeID string) (*m
 
 // StockReport is the resolver for the stockReport field.
 func (r *queryResolver) StockReport(ctx context.Context, storeID *string, productID *string, currency *string, period *string, startDate *string, endDate *string, typeArg *model.StockMovementType) (*model.StockReport, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify store access if storeID is provided
@@ -3544,9 +3522,9 @@ func (r *queryResolver) StockReport(ctx context.Context, storeID *string, produc
 
 // StockMovements is the resolver for the stockMovements field.
 func (r *queryResolver) StockMovements(ctx context.Context, storeID *string, productID *string, typeArg *model.StockMovementType, startDate *string, endDate *string, limit *int, offset *int) ([]*model.StockMovement, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Determine store IDs
@@ -3620,9 +3598,9 @@ func (r *queryResolver) StockMovements(ctx context.Context, storeID *string, pro
 
 // StockStats is the resolver for the stockStats field.
 func (r *queryResolver) StockStats(ctx context.Context, storeID *string, productID *string, period *string, startDate *string, endDate *string) (*model.StockStats, error) {
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify store access if storeID is provided
@@ -3671,9 +3649,9 @@ func (r *queryResolver) RapportStoreById(ctx context.Context, id string) (*model
 	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.GetUserFromContext(ctx)
-	if err != nil || currentUser == nil {
-		return nil, gqlerror.Errorf("Unauthorized")
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	rapport, err := r.DB.FindRapportStoreByID(id)

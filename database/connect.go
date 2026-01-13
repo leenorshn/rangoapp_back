@@ -251,6 +251,17 @@ func createIndexes(db *DB) {
 		{
 			Keys: map[string]interface{}{"companyId": 1},
 		},
+		{
+			// Index for soft delete filtering
+			Keys: map[string]interface{}{"deletedAt": 1},
+		},
+		{
+			// Compound index for companyId + deletedAt (for efficient filtering)
+			Keys: bson.D{
+				{Key: "companyId", Value: 1},
+				{Key: "deletedAt", Value: 1},
+			},
+		},
 	}
 	_, err = storeCollection.Indexes().CreateMany(ctx, storeIndexes)
 	if err != nil {
@@ -270,6 +281,17 @@ func createIndexes(db *DB) {
 				{Key: "name", Value: 1},
 			},
 		},
+		{
+			// Index for soft delete filtering
+			Keys: map[string]interface{}{"deletedAt": 1},
+		},
+		{
+			// Compound index for storeId + deletedAt (for efficient filtering)
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "deletedAt", Value: 1},
+			},
+		},
 	}
 	_, err = productCollection.Indexes().CreateMany(ctx, productIndexes)
 	if err != nil {
@@ -281,6 +303,17 @@ func createIndexes(db *DB) {
 	clientIndexes := []mongo.IndexModel{
 		{
 			Keys: map[string]interface{}{"storeId": 1},
+		},
+		{
+			// Index for soft delete filtering
+			Keys: map[string]interface{}{"deletedAt": 1},
+		},
+		{
+			// Compound index for storeId + deletedAt (for efficient filtering)
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "deletedAt", Value: 1},
+			},
 		},
 	}
 	_, err = clientCollection.Indexes().CreateMany(ctx, clientIndexes)
@@ -419,6 +452,18 @@ func createIndexes(db *DB) {
 		{
 			// Index for clientId queries
 			Keys: map[string]interface{}{"clientId": 1},
+		},
+		{
+			// Index for soft delete filtering
+			Keys: map[string]interface{}{"deletedAt": 1},
+		},
+		{
+			// Compound index for storeId + deletedAt + createdAt (for efficient filtering)
+			Keys: bson.D{
+				{Key: "storeId", Value: 1},
+				{Key: "deletedAt", Value: 1},
+				{Key: "createdAt", Value: -1},
+			},
 		},
 	}
 	_, err = saleCollection.Indexes().CreateMany(ctx, saleIndexes)

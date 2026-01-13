@@ -16,6 +16,7 @@ type Store struct {
 	CompanyID           primitive.ObjectID `bson:"companyId" json:"companyId"`
 	DefaultCurrency     string             `bson:"defaultCurrency" json:"defaultCurrency"`         // Currency par défaut (ex: "USD", "CDF")
 	SupportedCurrencies []string           `bson:"supportedCurrencies" json:"supportedCurrencies"` // Liste des currencies supportées
+	DeletedAt           *time.Time         `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
 	CreatedAt           time.Time          `bson:"createdAt" json:"createdAt"`
 	UpdatedAt           time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
@@ -88,7 +89,7 @@ func (db *DB) FindStoreByID(id string) (*Store, error) {
 	defer cancel()
 
 	var store Store
-	err = storeCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&store)
+	err = storeCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&store)
 	if err != nil {
 		return nil, gqlerror.Errorf("Store not found")
 	}
@@ -106,7 +107,7 @@ func (db *DB) FindStoresByCompanyID(companyID string) ([]*Store, error) {
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	cursor, err := storeCollection.Find(ctx, bson.M{"companyId": objectID})
+	cursor, err := storeCollection.Find(ctx, bson.M{"companyId": objectID, "deletedAt": nil})
 	if err != nil {
 		return nil, gqlerror.Errorf("Error finding stores: %v", err)
 	}
@@ -138,7 +139,7 @@ func (db *DB) FindStoresByIDs(storeIDs []string) ([]*Store, error) {
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	cursor, err := storeCollection.Find(ctx, bson.M{"_id": bson.M{"$in": objectIDs}})
+	cursor, err := storeCollection.Find(ctx, bson.M{"_id": bson.M{"$in": objectIDs}, "deletedAt": nil})
 	if err != nil {
 		return nil, gqlerror.Errorf("Error finding stores: %v", err)
 	}
@@ -277,7 +278,8 @@ func (db *DB) GetStoreDefaultCurrency(storeID string) (string, error) {
 	return store.DefaultCurrency, nil
 }
 
-func (db *DB) DeleteStore(id string) error {
+// SoftDeleteStore marks a store as deleted (soft delete)
+func (db *DB) SoftDeleteStore(id string) error {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return gqlerror.Errorf("Invalid store ID")
@@ -287,31 +289,32 @@ func (db *DB) DeleteStore(id string) error {
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	// Check if store has any products, clients, factures, etc.
-	productCollection := colHelper(db, "products")
-	productCount, _ := productCollection.CountDocuments(ctx, bson.M{"storeId": objectID})
-	if productCount > 0 {
-		return gqlerror.Errorf("Cannot delete store: it contains products")
-	}
-
-	clientCollection := colHelper(db, "clients")
-	clientCount, _ := clientCollection.CountDocuments(ctx, bson.M{"storeId": objectID})
-	if clientCount > 0 {
-		return gqlerror.Errorf("Cannot delete store: it contains clients")
-	}
-
-	factureCollection := colHelper(db, "factures")
-	factureCount, _ := factureCollection.CountDocuments(ctx, bson.M{"storeId": objectID})
-	if factureCount > 0 {
-		return gqlerror.Errorf("Cannot delete store: it contains factures")
-	}
-
-	_, err = storeCollection.DeleteOne(ctx, bson.M{"_id": objectID})
+	// Check if store exists and is not already deleted
+	var store Store
+	err = storeCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&store)
 	if err != nil {
-		return gqlerror.Errorf("Error deleting store: %v", err)
+		return gqlerror.Errorf("Store not found or already deleted")
+	}
+
+	// Soft delete: set deletedAt
+	now := time.Now()
+	_, err = storeCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"deletedAt": now,
+			"updatedAt": now,
+		},
+	})
+	if err != nil {
+		return gqlerror.Errorf("Error soft deleting store: %v", err)
 	}
 
 	return nil
+}
+
+// DeleteStore is kept for backward compatibility but now uses soft delete
+// Deprecated: Use SoftDeleteStore instead
+func (db *DB) DeleteStore(id string) error {
+	return db.SoftDeleteStore(id)
 }
 
 func (db *DB) VerifyStoreAccess(storeID, companyID string) (bool, error) {
@@ -334,7 +337,7 @@ func (db *DB) FindAllStores() ([]*Store, error) {
 	ctx, cancel := GetDBContext()
 	defer cancel()
 
-	cursor, err := storeCollection.Find(ctx, bson.M{})
+	cursor, err := storeCollection.Find(ctx, bson.M{"deletedAt": nil})
 	if err != nil {
 		return nil, gqlerror.Errorf("Error finding stores: %v", err)
 	}

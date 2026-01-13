@@ -42,7 +42,7 @@ func JwtGenerate(ctx context.Context, userID, companyID, role string, storeIDs [
 		StoreIDs:        storeIDs,
 		AssignedStoreID: assignedStoreID,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(time.Hour * 24).Unix(),
+			ExpiresAt: time.Now().Add(JWTTokenExpiration).Unix(),
 			IssuedAt:  time.Now().Unix(),
 		},
 	})
@@ -64,7 +64,7 @@ func JwtGenerateRefresh(ctx context.Context, userID, companyID, role string, sto
 		StoreIDs:        storeIDs,
 		AssignedStoreID: assignedStoreID,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(time.Hour * 24 * 7).Unix(), // 7 days
+			ExpiresAt: time.Now().Add(JWTRefreshTokenExpiration).Unix(),
 			IssuedAt:  time.Now().Unix(),
 		},
 	})

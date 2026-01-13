@@ -128,9 +128,7 @@ func TestAuthMiddleware_PanicPrevention(t *testing.T) {
 
 func TestAuthMiddleware_OPTIONSRequest(t *testing.T) {
 	req := httptest.NewRequest("OPTIONS", "/", nil)
-	rr := httptest.NewRecorder()
-
-	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rr := httptest.NewRecorder()	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -165,4 +163,3 @@ func TestCtxValue(t *testing.T) {
 		assert.Nil(t, claim)
 	})
 }
-

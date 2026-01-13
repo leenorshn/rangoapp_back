@@ -1,0 +1,58 @@
+name: rangoapp-backend
+region: nyc
+services:
+  - name: api
+    github:
+      repo: YOUR_USERNAME/rangoapp_back
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile.digitalocean
+    source_dir: /
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs  # $5/month - parfait pour <20 utilisateurs
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: MONGO_URI
+        scope: RUN_TIME
+        type: SECRET
+      - key: MONGO_DB_NAME
+        scope: RUN_TIME
+        type: SECRET
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: ALLOWED_ORIGINS
+        scope: RUN_TIME
+        type: SECRET
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: DB_TIMEOUT_SECONDS
+        value: "5"
+      - key: DB_CONNECT_TIMEOUT_SECONDS
+        value: "10"
+      - key: DB_MAX_RETRIES
+        value: "3"
+    routes:
+      - path: /
+    cors:
+      allow_origins:
+        - prefix: https://
+      allow_methods:
+        - GET
+        - POST
+        - OPTIONS
+      allow_headers:
+        - Content-Type
+        - Authorization
+      expose_headers:
+        - Content-Length
+      max_age: 86400

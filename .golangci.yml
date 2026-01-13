@@ -1,0 +1,174 @@
+# golangci-lint configuration
+# See https://golangci-lint.run/usage/configuration/ for more options
+
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - scripts
+  skip-files:
+    - ".*\\.gen\\.go$"
+    - ".*_test\\.go$" # Skip test files for now
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport # Can be useful sometimes
+      - ifElseChain # Can be more readable than switch
+  gocyclo:
+    min-complexity: 15
+  goimports:
+    local-prefixes: rangoapp
+  golint:
+    min-confidence: 0
+  govet:
+    check-shadowing: true
+  lll:
+    line-length: 120
+  maligned:
+    suggest-new: true
+  misspell:
+    locale: US
+  nolintlint:
+    allow-leading-space: true
+    allow-unused: false
+    require-explanation: false
+    require-specific: false
+  revive:
+    min-confidence: 0
+    rules:
+      - name: exported
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: var-declaration
+        severity: warning
+      - name: package-comments
+        severity: warning
+      - name: range
+        severity: warning
+      - name: increment-decrement
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: error-return
+        severity: warning
+      - name: error-strings
+        severity: warning
+      - name: receiver-naming
+        severity: warning
+      - name: unexported-return
+        severity: warning
+      - name: time-naming
+        severity: warning
+      - name: context-keys-type
+        severity: warning
+      - name: context-as-argument
+        severity: warning
+  staticcheck:
+    checks: ["all"]
+  unused:
+    check-exported: false
+  unparam:
+    check-exported: false
+  gosec:
+    severity: medium
+    confidence: medium
+  dupl:
+    threshold: 100
+  funlen:
+    lines: 100
+    statements: 50
+  gocognit:
+    min-complexity: 15
+  forbidigo:
+    forbid:
+      - ^fmt\.Print.*$
+      - ^fmt\.Fprint.*$
+      - ^fmt\.Sprint.*$
+
+linters:
+  # Enable all linters by default
+  enable-all: true
+  
+  # Disable specific linters that are too strict or not applicable
+  disable:
+    - errname      # Can be too strict for error naming
+    - exhaustivestruct # Can be too strict
+    - exhaustruct  # Can be too strict
+    - gochecknoglobals # Allow some globals (like dbInstance)
+    - gochecknoinits # Allow some inits
+    - godot        # Comment formatting can be flexible
+    - goerr113     # Error wrapping can be flexible
+    - gomnd        # Magic numbers can be acceptable in some cases
+    - interfacer   # Deprecated
+    - lll          # Line length can be flexible
+    - nlreturn     # Can be too strict
+    - noctx        # Context propagation can be handled differently
+    - nolintlint   # Can be too strict
+    - rowserrcheck # Can be too strict
+    - scopelint    # Deprecated
+    - structcheck  # Deprecated
+    - stylecheck   # Can conflict with other linters
+    - tagliatelle  # Can be too strict
+    - thelper      # Can be too strict for tests
+    - typecheck    # Already handled by go compiler
+    - unconvert    # Can be too strict
+    - unparam      # Can be too strict
+    - varcheck     # Deprecated
+    - varnamelen   # Can be too strict
+    - whitespace   # Can be too strict
+    - wrapcheck    # Can be too strict
+    - wsl           # Can be too strict
+
+issues:
+  exclude-rules:
+    # Exclude some linter issues from generated files
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    - path: generated\.go
+      linters:
+        - all
+    - path: models_gen\.go
+      linters:
+        - all
+    # Allow some common patterns
+    - text: "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Flush|os\\.Remove(All)?|.*printf?|os\\.(Un)?Setenv).* is not checked"
+      linters:
+        - errcheck
+    - text: "G104: Errors unhandled"
+      linters:
+        - gosec
+    # Allow fmt.Printf in scripts
+    - path: scripts/
+      linters:
+        - forbidigo
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude:
+    # Exclude known issues that are acceptable
+    - "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Flush|os\\.Remove(All)?|.*printf?|os\\.(Un)?Setenv).* is not checked"
+    - "G104: Errors unhandled"
+    - "exported.*should have comment"
+    - "comment on exported"
+    - "should have comment or be unexported"

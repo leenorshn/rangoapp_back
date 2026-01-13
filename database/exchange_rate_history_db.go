@@ -165,3 +165,5 @@ func (db *DB) CreateExchangeRateHistoryIndexes() error {
 
 
 
+
+

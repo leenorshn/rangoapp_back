@@ -15,6 +15,7 @@ type Client struct {
 	Phone       string             `bson:"phone" json:"phone"`
 	StoreID     primitive.ObjectID `bson:"storeId" json:"storeId"`
 	CreditLimit float64            `bson:"creditLimit" json:"creditLimit"` // Limite de crédit autorisée
+	DeletedAt   *time.Time         `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
 	CreatedAt   time.Time          `bson:"createdAt" json:"createdAt"`
 	UpdatedAt   time.Time          `bson:"updatedAt" json:"updatedAt"`
 }
@@ -59,7 +60,7 @@ func (db *DB) FindClientByID(id string) (*Client, error) {
 	defer cancel()
 
 	var client Client
-	err = clientCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&client)
+	err = clientCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&client)
 	if err != nil {
 		return nil, gqlerror.Errorf("Client not found")
 	}
@@ -72,7 +73,7 @@ func (db *DB) FindClientsByStoreIDs(storeIDs []primitive.ObjectID) ([]*Client, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cursor, err := clientCollection.Find(ctx, bson.M{"storeId": bson.M{"$in": storeIDs}})
+	cursor, err := clientCollection.Find(ctx, bson.M{"storeId": bson.M{"$in": storeIDs}, "deletedAt": nil})
 	if err != nil {
 		return nil, gqlerror.Errorf("Error finding clients: %v", err)
 	}
@@ -111,6 +112,13 @@ func (db *DB) UpdateClient(id string, name, phone *string, creditLimit *float64)
 		update["creditLimit"] = *creditLimit
 	}
 
+	// Check if client exists and is not deleted
+	var currentClient Client
+	err = clientCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&currentClient)
+	if err != nil {
+		return nil, gqlerror.Errorf("Client not found or deleted")
+	}
+
 	_, err = clientCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": update})
 	if err != nil {
 		return nil, gqlerror.Errorf("Error updating client: %v", err)
@@ -119,7 +127,8 @@ func (db *DB) UpdateClient(id string, name, phone *string, creditLimit *float64)
 	return db.FindClientByID(id)
 }
 
-func (db *DB) DeleteClient(id string) error {
+// SoftDeleteClient marks a client as deleted (soft delete)
+func (db *DB) SoftDeleteClient(id string) error {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return gqlerror.Errorf("Invalid client ID")
@@ -129,12 +138,32 @@ func (db *DB) DeleteClient(id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err = clientCollection.DeleteOne(ctx, bson.M{"_id": objectID})
+	// Check if client exists and is not already deleted
+	var client Client
+	err = clientCollection.FindOne(ctx, bson.M{"_id": objectID, "deletedAt": nil}).Decode(&client)
 	if err != nil {
-		return gqlerror.Errorf("Error deleting client: %v", err)
+		return gqlerror.Errorf("Client not found or already deleted")
+	}
+
+	// Soft delete: set deletedAt
+	now := time.Now()
+	_, err = clientCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{
+		"$set": bson.M{
+			"deletedAt": now,
+			"updatedAt": now,
+		},
+	})
+	if err != nil {
+		return gqlerror.Errorf("Error soft deleting client: %v", err)
 	}
 
 	return nil
+}
+
+// DeleteClient is kept for backward compatibility but now uses soft delete
+// Deprecated: Use SoftDeleteClient instead
+func (db *DB) DeleteClient(id string) error {
+	return db.SoftDeleteClient(id)
 }
 
 // GetClientCurrentDebt calcule la dette actuelle d'un client (somme des dettes impayées)
@@ -215,9 +244,7 @@ func (db *DB) GetClientAvailableCredit(clientID string) (float64, error) {
 	}
 
 	return availableCredit, nil
-}
-
-// CheckClientCredit vérifie si un client a assez de crédit pour un montant donné
+}// CheckClientCredit vérifie si un client a assez de crédit pour un montant donné
 func (db *DB) CheckClientCredit(clientID string, amount float64) (bool, float64, error) {
 	availableCredit, err := db.GetClientAvailableCredit(clientID)
 	if err != nil {
@@ -257,4 +284,3 @@ func (db *DB) UpdateClientCreditLimit(clientID string, newLimit float64) (*Clien
 
 	return db.FindClientByID(clientID)
 }
-

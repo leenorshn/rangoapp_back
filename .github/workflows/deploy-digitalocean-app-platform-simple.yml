@@ -1,0 +1,56 @@
+name: Deploy to DigitalOcean App Platform (Simple)
+
+# Ce workflow utilise l'API DigitalOcean pour déployer automatiquement
+# Il est plus simple que l'option avec app_action mais nécessite doctl CLI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests
+        run: go test ./... -v
+
+      - name: Build application
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -ldflags='-w -s' \
+            -o server \
+            ./server.go
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp server deploy/
+          cp Dockerfile.digitalocean deploy/Dockerfile
+          cp go.mod deploy/
+          cp go.sum deploy/
+          tar -czf deploy.tar.gz -C deploy .
+
+      - name: Deploy to App Platform
+        run: |
+          # Note: Cette approche nécessite que l'app soit déjà créée
+          # Utilisez l'interface web ou doctl pour créer l'app initialement
+          doctl apps create-deployment ${{ secrets.DIGITALOCEAN_APP_ID }} \
+            --force-rebuild \
+            --wait

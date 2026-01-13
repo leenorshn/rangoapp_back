@@ -69,7 +69,7 @@ func TestJwtGenerateRefresh(t *testing.T) {
 	assert.Equal(t, role, claims.Role)
 	
 	// Refresh token should expire in 7 days
-	expectedExpiry := time.Now().Add(time.Hour * 24 * 7).Unix()
+	expectedExpiry := time.Now().Add(JWTRefreshTokenExpiration).Unix()
 	// Allow 1 minute tolerance
 	assert.InDelta(t, expectedExpiry, claims.ExpiresAt, 60)
 }
@@ -190,6 +190,8 @@ func TestGetJwtSecret(t *testing.T) {
 		assert.Equal(t, "short", secret)
 	})
 }
+
+
 
 
 

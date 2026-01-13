@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vektah/gqlparser/v2/gqlerror"
+	"rangoapp/utils"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -53,7 +54,7 @@ func (db *DB) CreateDebt(saleID, clientID, storeID primitive.ObjectID, totalAmou
 		"advance": true,
 	}
 	if !validPaymentTypes[paymentType] {
-		return nil, gqlerror.Errorf("Invalid payment type: %s. Valid types: cash, debt, advance", paymentType)
+		return nil, utils.ValidationErrorf("Invalid payment type: %s. Valid types: cash, debt, advance", paymentType)
 	}
 
 	// Determine status
@@ -88,7 +89,7 @@ func (db *DB) CreateDebt(saleID, clientID, storeID primitive.ObjectID, totalAmou
 
 	_, err := debtCollection.InsertOne(ctx, debt)
 	if err != nil {
-		return nil, gqlerror.Errorf("Error creating debt: %v", err)
+		return nil, utils.DatabaseErrorf("create_debt", "Error creating debt: %v", err)
 	}
 
 	return &debt, nil
@@ -98,7 +99,7 @@ func (db *DB) CreateDebt(saleID, clientID, storeID primitive.ObjectID, totalAmou
 func (db *DB) PayDebt(debtID string, amount float64, operatorID, storeID primitive.ObjectID, description string) (*Debt, *DebtPayment, error) {
 	objectID, err := primitive.ObjectIDFromHex(debtID)
 	if err != nil {
-		return nil, nil, gqlerror.Errorf("Invalid debt ID")
+		return nil, nil, utils.ValidationErrorf("Invalid debt ID")
 	}
 
 	debtCollection := colHelper(db, "debts")
@@ -111,23 +112,23 @@ func (db *DB) PayDebt(debtID string, amount float64, operatorID, storeID primiti
 	err = debtCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&debt)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, nil, gqlerror.Errorf("Debt not found")
+			return nil, nil, utils.NotFoundErrorf("Debt not found")
 		}
-		return nil, nil, gqlerror.Errorf("Error finding debt: %v", err)
+		return nil, nil, utils.DatabaseErrorf("find_debt", "Error finding debt: %v", err)
 	}
 
 	// Validate amount
 	if amount <= 0 {
-		return nil, nil, gqlerror.Errorf("Payment amount must be greater than 0")
+		return nil, nil, utils.ValidationErrorf("Payment amount must be greater than 0")
 	}
 
 	if amount > debt.AmountDue {
-		return nil, nil, gqlerror.Errorf("Payment amount (%.2f) exceeds remaining debt (%.2f)", amount, debt.AmountDue)
+		return nil, nil, utils.ValidationErrorf("Payment amount (%.2f) exceeds remaining debt (%.2f)", amount, debt.AmountDue)
 	}
 
 	// Verify store access
 	if debt.StoreID != storeID {
-		return nil, nil, gqlerror.Errorf("Debt does not belong to the specified store")
+		return nil, nil, utils.ValidationErrorf("Debt does not belong to the specified store")
 	}
 
 	// Calculate new amounts
@@ -161,7 +162,7 @@ func (db *DB) PayDebt(debtID string, amount float64, operatorID, storeID primiti
 
 	_, err = paymentCollection.InsertOne(ctx, payment)
 	if err != nil {
-		return nil, nil, gqlerror.Errorf("Error creating payment record: %v", err)
+		return nil, nil, utils.DatabaseErrorf("create_payment", "Error creating payment record: %v", err)
 	}
 
 	// Update debt
@@ -177,16 +178,18 @@ func (db *DB) PayDebt(debtID string, amount float64, operatorID, storeID primiti
 
 	_, err = debtCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": update})
 	if err != nil {
-		return nil, nil, gqlerror.Errorf("Error updating debt: %v", err)
+		return nil, nil, utils.DatabaseErrorf("update_debt", "Error updating debt: %v", err)
 	}
 
 	// Reload debt
 	err = debtCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&debt)
 	if err != nil {
-		return nil, nil, gqlerror.Errorf("Error reloading debt: %v", err)
+		return nil, nil, utils.DatabaseErrorf("reload_debt", "Error reloading debt: %v", err)
 	}
 
 	// Create caisse transaction for the payment
+	// Note: If this fails, we log it but don't fail the payment since it's already recorded
+	// In a production system, you might want to retry this or use a queue
 	_, err = db.CreateTrans(
 		"Entree",
 		amount,
@@ -197,8 +200,9 @@ func (db *DB) PayDebt(debtID string, amount float64, operatorID, storeID primiti
 		&now,
 	)
 	if err != nil {
-		// Log error but don't fail the payment
-		// The payment is already recorded
+		// Log error but don't fail the payment - the payment is already recorded in the database
+		// This is a non-critical operation that can be retried later if needed
+		utils.LogError(err, fmt.Sprintf("Failed to create caisse transaction for debt payment %s (debt: %s)", payment.ID.Hex(), debtID))
 	}
 
 	return &debt, &payment, nil
@@ -208,7 +212,7 @@ func (db *DB) PayDebt(debtID string, amount float64, operatorID, storeID primiti
 func (db *DB) GetDebtByID(debtID string) (*Debt, error) {
 	objectID, err := primitive.ObjectIDFromHex(debtID)
 	if err != nil {
-		return nil, gqlerror.Errorf("Invalid debt ID")
+		return nil, utils.ValidationErrorf("Invalid debt ID")
 	}
 
 	debtCollection := colHelper(db, "debts")
@@ -219,9 +223,9 @@ func (db *DB) GetDebtByID(debtID string) (*Debt, error) {
 	err = debtCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&debt)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, gqlerror.Errorf("Debt not found")
+			return nil, utils.NotFoundErrorf("Debt not found")
 		}
-		return nil, gqlerror.Errorf("Error finding debt: %v", err)
+		return nil, utils.DatabaseErrorf("find_debt", "Error finding debt: %v", err)
 	}
 
 	return &debt, nil
@@ -231,7 +235,7 @@ func (db *DB) GetDebtByID(debtID string) (*Debt, error) {
 func (db *DB) GetDebtBySaleID(saleID string) (*Debt, error) {
 	objectID, err := primitive.ObjectIDFromHex(saleID)
 	if err != nil {
-		return nil, gqlerror.Errorf("Invalid sale ID")
+		return nil, utils.ValidationErrorf("Invalid sale ID")
 	}
 
 	debtCollection := colHelper(db, "debts")
@@ -244,7 +248,7 @@ func (db *DB) GetDebtBySaleID(saleID string) (*Debt, error) {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil // No debt for this sale (it's okay)
 		}
-		return nil, gqlerror.Errorf("Error finding debt: %v", err)
+		return nil, utils.DatabaseErrorf("find_debt_by_sale", "Error finding debt: %v", err)
 	}
 
 	return &debt, nil
@@ -254,7 +258,7 @@ func (db *DB) GetDebtBySaleID(saleID string) (*Debt, error) {
 func (db *DB) GetClientDebts(clientID string, storeID *string) ([]*Debt, error) {
 	clientObjectID, err := primitive.ObjectIDFromHex(clientID)
 	if err != nil {
-		return nil, gqlerror.Errorf("Invalid client ID")
+		return nil, utils.ValidationErrorf("Invalid client ID")
 	}
 
 	debtCollection := colHelper(db, "debts")
@@ -265,20 +269,20 @@ func (db *DB) GetClientDebts(clientID string, storeID *string) ([]*Debt, error) 
 	if storeID != nil {
 		storeObjectID, err := primitive.ObjectIDFromHex(*storeID)
 		if err != nil {
-			return nil, gqlerror.Errorf("Invalid store ID")
+			return nil, utils.ValidationErrorf("Invalid store ID")
 		}
 		filter["storeId"] = storeObjectID
 	}
 
 	cursor, err := debtCollection.Find(ctx, filter, options.Find().SetSort(bson.M{"createdAt": -1}))
 	if err != nil {
-		return nil, gqlerror.Errorf("Error finding debts: %v", err)
+		return nil, utils.DatabaseErrorf("find_client_debts", "Error finding debts: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var debts []*Debt
 	if err = cursor.All(ctx, &debts); err != nil {
-		return nil, gqlerror.Errorf("Error decoding debts: %v", err)
+		return nil, utils.DatabaseErrorf("decode_client_debts", "Error decoding debts: %v", err)
 	}
 
 	return debts, nil
@@ -288,7 +292,7 @@ func (db *DB) GetClientDebts(clientID string, storeID *string) ([]*Debt, error) 
 func (db *DB) GetDebtPayments(debtID string) ([]*DebtPayment, error) {
 	objectID, err := primitive.ObjectIDFromHex(debtID)
 	if err != nil {
-		return nil, gqlerror.Errorf("Invalid debt ID")
+		return nil, utils.ValidationErrorf("Invalid debt ID")
 	}
 
 	paymentCollection := colHelper(db, "debtPayments")
@@ -297,13 +301,13 @@ func (db *DB) GetDebtPayments(debtID string) ([]*DebtPayment, error) {
 
 	cursor, err := paymentCollection.Find(ctx, bson.M{"debtId": objectID}, options.Find().SetSort(bson.M{"createdAt": 1}))
 	if err != nil {
-		return nil, gqlerror.Errorf("Error finding payments: %v", err)
+		return nil, utils.DatabaseErrorf("find_debt_payments", "Error finding payments: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var payments []*DebtPayment
 	if err = cursor.All(ctx, &payments); err != nil {
-		return nil, gqlerror.Errorf("Error decoding payments: %v", err)
+		return nil, utils.DatabaseErrorf("decode_debt_payments", "Error decoding payments: %v", err)
 	}
 
 	return payments, nil
@@ -322,13 +326,13 @@ func (db *DB) GetStoreDebts(storeIDs []primitive.ObjectID, status *string) ([]*D
 
 	cursor, err := debtCollection.Find(ctx, filter, options.Find().SetSort(bson.M{"createdAt": -1}))
 	if err != nil {
-		return nil, gqlerror.Errorf("Error finding debts: %v", err)
+		return nil, utils.DatabaseErrorf("find_store_debts", "Error finding debts: %v", err)
 	}
 	defer cursor.Close(ctx)
 
 	var debts []*Debt
 	if err = cursor.All(ctx, &debts); err != nil {
-		return nil, gqlerror.Errorf("Error decoding debts: %v", err)
+		return nil, utils.DatabaseErrorf("decode_store_debts", "Error decoding debts: %v", err)
 	}
 
 	return debts, nil
