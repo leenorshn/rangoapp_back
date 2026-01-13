@@ -17,7 +17,7 @@ vendor/
 # Go workspace file
 go.work
 
-
+# Go
 
 # IDE specific files
 .vscode/
