@@ -1014,8 +1014,7 @@ func (r *mutationResolver) UpdateClientCreditLimit(ctx context.Context, clientID
 	if err := validators.ValidateObjectID(clientID, "Client ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1023,8 +1022,6 @@ func (r *mutationResolver) UpdateClientCreditLimit(ctx context.Context, clientID
 	if err := r.RequireAdmin(ctx); err != nil {
 		return nil, err
 	}
-	// Re-get user after RequireAdmin check (we know it's valid from RequireAdmin)
-	currentUser, _ = r.RequireAuthenticated(ctx)
 
 	// Get client to verify store access
 	client, err := r.DB.FindClientByID(clientID)
@@ -1279,8 +1276,7 @@ func (r *mutationResolver) UpdateFacture(ctx context.Context, id string, input m
 	if err := validators.ValidateUpdateFactureInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1353,8 +1349,7 @@ func (r *mutationResolver) DeleteFacture(ctx context.Context, id string) (bool, 
 	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return false, err
 	}
 
@@ -1382,8 +1377,7 @@ func (r *mutationResolver) CreateRapportStore(ctx context.Context, input model.C
 	if err := validators.ValidateCreateRapportStoreInput(&input); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1461,8 +1455,7 @@ func (r *mutationResolver) DeleteRapportStore(ctx context.Context, id string) (b
 	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return false, err
 	}
 
@@ -1570,8 +1563,7 @@ func (r *mutationResolver) DeleteCaisseTransaction(ctx context.Context, id strin
 	if err := validators.ValidateObjectID(id, "Transaction ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return false, err
 	}
 
@@ -1733,8 +1725,7 @@ func (r *mutationResolver) DeleteSale(ctx context.Context, id string) (bool, err
 	if err := validators.ValidateObjectID(id, "Sale ID"); err != nil {
 		return false, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return false, err
 	}
 
@@ -1763,8 +1754,7 @@ func (r *mutationResolver) CreateFactureFromSale(ctx context.Context, saleID str
 	if err := validators.ValidateObjectID(saleID, "Sale ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1995,8 +1985,7 @@ func (r *mutationResolver) CompleteInventory(ctx context.Context, inventoryID st
 		return nil, err
 	}
 
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2026,8 +2015,7 @@ func (r *mutationResolver) CancelInventory(ctx context.Context, inventoryID stri
 		return nil, err
 	}
 
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2390,8 +2378,7 @@ func (r *queryResolver) Store(ctx context.Context, id string) (*model.Store, err
 	if err := validators.ValidateObjectID(id, "Store ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2411,8 +2398,7 @@ func (r *queryResolver) Store(ctx context.Context, id string) (*model.Store, err
 
 // Products is the resolver for the products field.
 func (r *queryResolver) Products(ctx context.Context, storeID *string) ([]*model.Product, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2456,8 +2442,7 @@ func (r *queryResolver) Product(ctx context.Context, id string) (*model.Product,
 	if err := validators.ValidateObjectID(id, "Product ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2477,12 +2462,12 @@ func (r *queryResolver) Product(ctx context.Context, id string) (*model.Product,
 
 // ProductsInStock is the resolver for the productsInStock field.
 func (r *queryResolver) ProductsInStock(ctx context.Context, storeID *string, productID *string, providerID *string) ([]*model.ProductInStock, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
 			return nil, err
@@ -2526,8 +2511,7 @@ func (r *queryResolver) ProductInStock(ctx context.Context, id string) (*model.P
 	if err := validators.ValidateObjectID(id, "Product In Stock ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2546,12 +2530,12 @@ func (r *queryResolver) ProductInStock(ctx context.Context, id string) (*model.P
 
 // StockSupplies is the resolver for the stockSupplies field.
 func (r *queryResolver) StockSupplies(ctx context.Context, storeID *string, productID *string, providerID *string) ([]*model.StockSupply, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
 			return nil, err
@@ -2595,8 +2579,7 @@ func (r *queryResolver) StockSupply(ctx context.Context, id string) (*model.Stoc
 	if err := validators.ValidateObjectID(id, "Stock Supply ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2615,12 +2598,12 @@ func (r *queryResolver) StockSupply(ctx context.Context, id string) (*model.Stoc
 
 // ProviderDebts is the resolver for the providerDebts field.
 func (r *queryResolver) ProviderDebts(ctx context.Context, storeID *string, providerID *string, status *string) ([]*model.ProviderDebt, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
 			return nil, err
@@ -2663,8 +2646,7 @@ func (r *queryResolver) ProviderDebt(ctx context.Context, id string) (*model.Pro
 	if err := validators.ValidateObjectID(id, "Provider Debt ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2683,12 +2665,12 @@ func (r *queryResolver) ProviderDebt(ctx context.Context, id string) (*model.Pro
 
 // Clients is the resolver for the clients field.
 func (r *queryResolver) Clients(ctx context.Context, storeID *string) ([]*model.Client, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
 		if err != nil || !hasAccess {
@@ -2722,8 +2704,7 @@ func (r *queryResolver) Client(ctx context.Context, id string) (*model.Client, e
 	if err := validators.ValidateObjectID(id, "Client ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2742,8 +2723,7 @@ func (r *queryResolver) Client(ctx context.Context, id string) (*model.Client, e
 
 // Providers is the resolver for the providers field.
 func (r *queryResolver) Providers(ctx context.Context, storeID *string) ([]*model.Provider, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2781,8 +2761,7 @@ func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provide
 	if err := validators.ValidateObjectID(id, "Provider ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2800,8 +2779,7 @@ func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provide
 
 // Factures is the resolver for the factures field.
 func (r *queryResolver) Factures(ctx context.Context, storeID *string) ([]*model.Facture, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2839,8 +2817,7 @@ func (r *queryResolver) Facture(ctx context.Context, id string) (*model.Facture,
 	if err := validators.ValidateObjectID(id, "Facture ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2859,8 +2836,7 @@ func (r *queryResolver) Facture(ctx context.Context, id string) (*model.Facture,
 
 // RapportStore is the resolver for the rapportStore field.
 func (r *queryResolver) RapportStore(ctx context.Context, storeID *string) ([]*model.RapportStore, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2898,8 +2874,7 @@ func (r *queryResolver) RapportStoreByID(ctx context.Context, id string) (*model
 	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2918,13 +2893,13 @@ func (r *queryResolver) RapportStoreByID(ctx context.Context, id string) (*model
 
 // Caisse is the resolver for the caisse field.
 func (r *queryResolver) Caisse(ctx context.Context, storeID *string, currency *string, period *string) (*model.Caisse, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
 	var storeIDStr *string
+	var err error
 
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
@@ -2966,8 +2941,7 @@ func (r *queryResolver) Caisse(ctx context.Context, storeID *string, currency *s
 
 // CaisseTransactions is the resolver for the caisseTransactions field.
 func (r *queryResolver) CaisseTransactions(ctx context.Context, storeID *string, currency *string, period *string, limit *int) ([]*model.CaisseTransaction, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3014,8 +2988,7 @@ func (r *queryResolver) CaisseTransaction(ctx context.Context, id string) (*mode
 	if err := validators.ValidateObjectID(id, "Transaction ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3035,12 +3008,12 @@ func (r *queryResolver) CaisseTransaction(ctx context.Context, id string) (*mode
 
 // CaisseRapport is the resolver for the caisseRapport field.
 func (r *queryResolver) CaisseRapport(ctx context.Context, storeID *string, currency *string, period *string, startDate *string, endDate *string) (*model.CaisseRapport, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDStr *string
+	var err error
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
 			return nil, err
@@ -3069,12 +3042,12 @@ func (r *queryResolver) CaisseRapport(ctx context.Context, storeID *string, curr
 
 // Sales is the resolver for the sales field.
 func (r *queryResolver) Sales(ctx context.Context, storeID *string, limit *int, offset *int, period *string, startDate *string, endDate *string, currency *string) ([]*model.Sale, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
@@ -3100,7 +3073,8 @@ func (r *queryResolver) Sales(ctx context.Context, storeID *string, limit *int, 
 		return []*model.Sale{}, nil
 	}
 
-	sales, err := r.DB.FindSalesByStoreIDsWithFilters(storeIDs, limit, offset, period, startDate, endDate, currency)
+	var sales []*database.Sale
+	sales, err = r.DB.FindSalesByStoreIDsWithFilters(storeIDs, limit, offset, period, startDate, endDate, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -3115,12 +3089,12 @@ func (r *queryResolver) Sales(ctx context.Context, storeID *string, limit *int, 
 
 // SalesList is the resolver for the salesList field.
 func (r *queryResolver) SalesList(ctx context.Context, storeID *string, limit *int, offset *int, period *string, startDate *string, endDate *string, currency *string) ([]*model.SaleList, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
@@ -3148,7 +3122,8 @@ func (r *queryResolver) SalesList(ctx context.Context, storeID *string, limit *i
 
 	// Use optimized function with projection for list view (lazy loading)
 	// This function only retrieves necessary fields, reducing data transfer
-	sales, err := r.DB.FindSalesListByStoreIDsWithFilters(storeIDs, limit, offset, period, startDate, endDate, currency)
+	var sales []*database.Sale
+	sales, err = r.DB.FindSalesListByStoreIDsWithFilters(storeIDs, limit, offset, period, startDate, endDate, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -3204,12 +3179,12 @@ func (r *queryResolver) SalesCount(ctx context.Context, storeID *string, period 
 
 // SalesStats is the resolver for the salesStats field.
 func (r *queryResolver) SalesStats(ctx context.Context, storeID *string, period *string, startDate *string, endDate *string, currency *string) (*model.SalesStats, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 
 	if storeID != nil {
 		if err := validators.ValidateObjectID(*storeID, "Store ID"); err != nil {
@@ -3267,8 +3242,7 @@ func (r *queryResolver) Sale(ctx context.Context, id string) (*model.Sale, error
 	if err := validators.ValidateObjectID(id, "Sale ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3288,12 +3262,12 @@ func (r *queryResolver) Sale(ctx context.Context, id string) (*model.Sale, error
 
 // Debts is the resolver for the debts field.
 func (r *queryResolver) Debts(ctx context.Context, storeID *string, status *string) ([]*model.Debt, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
 		if err != nil || !hasAccess {
@@ -3313,7 +3287,8 @@ func (r *queryResolver) Debts(ctx context.Context, storeID *string, status *stri
 		return []*model.Debt{}, nil
 	}
 
-	debts, err := r.DB.GetStoreDebts(storeIDs, status)
+	var debts []*database.Debt
+	debts, err = r.DB.GetStoreDebts(storeIDs, status)
 	if err != nil {
 		return nil, err
 	}
@@ -3331,8 +3306,7 @@ func (r *queryResolver) Debt(ctx context.Context, id string) (*model.Debt, error
 	if err := validators.ValidateObjectID(id, "Debt ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3355,8 +3329,7 @@ func (r *queryResolver) ClientDebts(ctx context.Context, clientID string, storeI
 	if err := validators.ValidateObjectID(clientID, "Client ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3392,12 +3365,12 @@ func (r *queryResolver) ClientDebts(ctx context.Context, clientID string, storeI
 
 // Inventories is the resolver for the inventories field.
 func (r *queryResolver) Inventories(ctx context.Context, storeID *string, status *string) ([]*model.Inventory, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
 		if err != nil || !hasAccess {
@@ -3417,7 +3390,8 @@ func (r *queryResolver) Inventories(ctx context.Context, storeID *string, status
 		return []*model.Inventory{}, nil
 	}
 
-	inventories, err := r.DB.GetInventoriesByStoreIDs(storeIDs, status)
+	var inventories []*database.Inventory
+	inventories, err = r.DB.GetInventoriesByStoreIDs(storeIDs, status)
 	if err != nil {
 		return nil, err
 	}
@@ -3435,8 +3409,7 @@ func (r *queryResolver) Inventory(ctx context.Context, id string) (*model.Invent
 	if err := validators.ValidateObjectID(id, "Inventory ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3459,8 +3432,7 @@ func (r *queryResolver) ActiveInventory(ctx context.Context, storeID string) (*m
 	if err := validators.ValidateObjectID(storeID, "Store ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3484,12 +3456,12 @@ func (r *queryResolver) ActiveInventory(ctx context.Context, storeID string) (*m
 
 // StockReport is the resolver for the stockReport field.
 func (r *queryResolver) StockReport(ctx context.Context, storeID *string, productID *string, currency *string, period *string, startDate *string, endDate *string, typeArg *model.StockMovementType) (*model.StockReport, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	// Verify store access if storeID is provided
+	var err error
 	if storeID != nil {
 		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
 		if err != nil || !hasAccess {
@@ -3522,13 +3494,13 @@ func (r *queryResolver) StockReport(ctx context.Context, storeID *string, produc
 
 // StockMovements is the resolver for the stockMovements field.
 func (r *queryResolver) StockMovements(ctx context.Context, storeID *string, productID *string, typeArg *model.StockMovementType, startDate *string, endDate *string, limit *int, offset *int) ([]*model.StockMovement, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	// Determine store IDs
 	var storeIDs []primitive.ObjectID
+	var err error
 	if storeID != nil {
 		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
 		if err != nil || !hasAccess {
@@ -3598,12 +3570,12 @@ func (r *queryResolver) StockMovements(ctx context.Context, storeID *string, pro
 
 // StockStats is the resolver for the stockStats field.
 func (r *queryResolver) StockStats(ctx context.Context, storeID *string, productID *string, period *string, startDate *string, endDate *string) (*model.StockStats, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
 	// Verify store access if storeID is provided
+	var err error
 	if storeID != nil {
 		hasAccess, err := r.HasStoreAccess(ctx, *storeID)
 		if err != nil || !hasAccess {
@@ -3649,8 +3621,7 @@ func (r *queryResolver) RapportStoreById(ctx context.Context, id string) (*model
 	if err := validators.ValidateObjectID(id, "RapportStore ID"); err != nil {
 		return nil, err
 	}
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
