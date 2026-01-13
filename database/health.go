@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	healthStatus     = "unknown"
+	healthStatus      = "unknown"
 	healthStatusMutex sync.RWMutex
 	lastHealthCheck   time.Time
 	healthCheckMutex  sync.Mutex
@@ -49,7 +49,7 @@ func (db *DB) CheckHealth() HealthStatus {
 		utils.Error("MongoDB health check failed: %v", err)
 		return HealthStatus{
 			Status:    "unhealthy",
-			Message:   "MongoDB connection failed: " + err.Error(),
+			Message:   "MongoDB connection failed : " + err.Error(),
 			Timestamp: lastHealthCheck,
 			Latency:   latency.String(),
 		}
@@ -156,5 +156,3 @@ func (db *DB) Reconnect() error {
 	utils.Info("Successfully reconnected to MongoDB")
 	return nil
 }
-
-
