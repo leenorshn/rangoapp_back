@@ -21,6 +21,7 @@ type Company struct {
 	Rccm          *string            `bson:"rccm,omitempty" json:"rccm,omitempty"`
 	IDNat         *string            `bson:"idNat,omitempty" json:"idNat,omitempty"`
 	IDCommerce    *string            `bson:"idCommerce,omitempty" json:"idCommerce,omitempty"`
+	LicenseID     *string            `bson:"licenseId,omitempty" json:"licenseId,omitempty"` // ID de licence pour l'exploitation annuelle
 	ExchangeRates []ExchangeRate     `bson:"exchangeRates" json:"exchangeRates"` // Taux de change configurés
 	CreatedAt     time.Time          `bson:"createdAt" json:"createdAt"`
 	UpdatedAt     time.Time          `bson:"updatedAt" json:"updatedAt"`
@@ -87,7 +88,7 @@ func (db *DB) FindCompanyByID(id string) (*Company, error) {
 	return &company, nil
 }
 
-func (db *DB) UpdateCompany(id string, name, address, phone, description, companyType *string, email, logo, rccm, idNat, idCommerce *string) (*Company, error) {
+func (db *DB) UpdateCompany(id string, name, address, phone, description, companyType *string, email, logo, rccm, idNat, idCommerce, licenseID *string) (*Company, error) {
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, gqlerror.Errorf("Invalid company ID")
@@ -127,6 +128,9 @@ func (db *DB) UpdateCompany(id string, name, address, phone, description, compan
 	}
 	if idCommerce != nil {
 		update["idCommerce"] = *idCommerce
+	}
+	if licenseID != nil {
+		update["licenseId"] = *licenseID
 	}
 
 	_, err = companyCollection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": update})

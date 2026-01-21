@@ -72,6 +72,35 @@ Le script affiche :
 ============================================================
 ```
 
+## Migrer les `licenseId` des companies
+
+Ce script ajoute un `licenseId` aux companies pour la nouvelle facturation annuelle.
+
+### Utilisation
+
+1. **Variables d'environnement** :
+   - `MONGO_URI` : URI de connexion MongoDB
+   - `MONGO_DB_NAME` : Nom de la base de données (optionnel, défaut: `rangodb`)
+   - `LICENSE_ASSIGN_MODE` : Mode d'attribution (`expired-trial`, `all-active`, `all`)
+   - `LICENSE_ID_PREFIX` : Préfixe pour l'ID (optionnel, défaut: `LIC-`)
+   - `DRY_RUN` : `true` pour simuler, `false` pour écrire (optionnel, défaut: `true`)
+
+2. **Exécution** :
+
+```bash
+# Simulation (recommandé)
+DRY_RUN=true LICENSE_ASSIGN_MODE=expired-trial go run ./scripts/migrate_company_license_id
+
+# Appliquer les changements
+DRY_RUN=false LICENSE_ASSIGN_MODE=expired-trial go run ./scripts/migrate_company_license_id
+```
+
+### Modes
+
+- `expired-trial` : assigne un `licenseId` aux companies avec souscription active et essai expiré
+- `all-active` : assigne un `licenseId` aux companies avec souscription active
+- `all` : assigne un `licenseId` à toutes les companies sans `licenseId`
+
 ## Étendre les dates de souscription de 15 jours
 
 Ce script met à jour toutes les souscriptions existantes en ajoutant 15 jours à partir de la date de création de la company.

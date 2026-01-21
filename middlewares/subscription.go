@@ -66,8 +66,8 @@ func ValidateSubscriptionInContext(ctx context.Context, db *database.DB) error {
 	return nil
 }
 
-// CheckSubscriptionLimits vérifie les limites d'abonnement pour une action spécifique
-func CheckSubscriptionLimits(ctx context.Context, db *database.DB, action string) error {
+// CheckSubscription vérifie simplement si l'abonnement est valide (trial actif ou license valide)
+func CheckSubscription(ctx context.Context, db *database.DB) error {
 	claim := CtxValue(ctx)
 	if claim == nil {
 		return nil // Pas de token, sera géré par l'auth
@@ -78,13 +78,8 @@ func CheckSubscriptionLimits(ctx context.Context, db *database.DB, action string
 		return nil
 	}
 
-	// Vérifier les limites
-	err := db.CheckSubscriptionLimits(claim.CompanyID, action)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// Vérifier l'abonnement (trial ou license)
+	return db.CheckSubscription(claim.CompanyID)
 }
 
 // IsSubscriptionActive vérifie si l'abonnement est actif (utilisé dans les resolvers)
@@ -99,6 +94,12 @@ func IsSubscriptionActive(ctx context.Context, db *database.DB) (bool, error) {
 		return true, nil
 	}
 
+	// Vérifier si la company a un licenseID valide
+	company, err := db.FindCompanyByID(claim.CompanyID)
+	if err == nil && company.LicenseID != nil && *company.LicenseID != "" {
+		return true, nil // License annuelle valide
+	}
+
 	subscription, err := db.GetCompanySubscription(claim.CompanyID)
 	if err != nil {
 		// Si pas d'abonnement trouvé, créer un essai par défaut
@@ -107,17 +108,12 @@ func IsSubscriptionActive(ctx context.Context, db *database.DB) (bool, error) {
 	}
 
 	// Vérifier si l'essai est expiré
-	if subscription.Plan == "trial" && time.Now().After(subscription.TrialEndDate) {
+	if time.Now().After(subscription.TrialEndDate) {
 		return false, nil
 	}
 
 	// Vérifier si l'abonnement est actif
 	if subscription.Status != "active" {
-		return false, nil
-	}
-
-	// Vérifier si l'abonnement payant est expiré
-	if subscription.SubscriptionEndDate != nil && time.Now().After(*subscription.SubscriptionEndDate) {
 		return false, nil
 	}
 

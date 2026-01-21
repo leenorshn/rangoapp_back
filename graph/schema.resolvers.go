@@ -138,9 +138,8 @@ func (r *mutationResolver) CreateUser(ctx context.Context, input model.CreateUse
 		return nil, gqlerror.Errorf("Only Admin can create users")
 	}
 
-	// Check subscription limits
-	err = r.DB.CheckSubscriptionLimits(currentUser.CompanyID.Hex(), "create_user")
-	if err != nil {
+	// Check subscription (trial or license)
+	if err := r.CheckSubscription(ctx); err != nil {
 		return nil, err
 	}
 
@@ -413,6 +412,10 @@ func (r *mutationResolver) UpdateCompany(ctx context.Context, input model.Update
 		return nil, gqlerror.Errorf("Only Admin can update company")
 	}
 
+	var licenseID *string
+	if input.LicenseID != nil {
+		licenseID = input.LicenseID
+	}
 	company, err := r.DB.UpdateCompany(
 		currentUser.CompanyID.Hex(),
 		input.Name,
@@ -425,6 +428,7 @@ func (r *mutationResolver) UpdateCompany(ctx context.Context, input model.Update
 		input.Rccm,
 		input.IDNat,
 		input.IDCommerce,
+		licenseID,
 	)
 	if err != nil {
 		return nil, err
@@ -461,6 +465,125 @@ func (r *mutationResolver) DeleteCompany(ctx context.Context) (bool, error) {
 	if err != nil {
 		utils.LogError(err, "Error updating user company ID after deletion")
 		// Don't fail the deletion, just log the error
+	}
+
+	return true, nil
+}
+
+// CreateSubscription is the resolver for the createSubscription field.
+func (r *mutationResolver) CreateSubscription(ctx context.Context, plan string, paymentMethod string, paymentID string) (*model.CompanySubscription, error) {
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if currentUser.CompanyID == primitive.NilObjectID {
+		return nil, gqlerror.Errorf("User does not have a company yet")
+	}
+
+	if plan == "" {
+		return nil, gqlerror.Errorf("Plan is required")
+	}
+	if paymentMethod == "" {
+		return nil, gqlerror.Errorf("Payment method is required")
+	}
+	if paymentID == "" {
+		return nil, gqlerror.Errorf("Payment ID is required")
+	}
+
+	if _, err := r.DB.GetSubscriptionPlanByID(plan); err != nil {
+		return nil, err
+	}
+
+	if err := r.DB.SetLicenseID(currentUser.CompanyID.Hex(), paymentID); err != nil {
+		return nil, err
+	}
+
+	subscription, err := r.DB.GetCompanySubscription(currentUser.CompanyID.Hex())
+	if err != nil {
+		subscription, err = r.DB.CreateTrialSubscription(currentUser.CompanyID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if subscription.Status != "active" {
+		if err := r.DB.UpdateSubscriptionStatus(subscription.ID.Hex(), "active"); err != nil {
+			return nil, err
+		}
+		subscription.Status = "active"
+	}
+
+	return convertSubscriptionToGraphQL(subscription), nil
+}
+
+// UpgradeSubscription is the resolver for the upgradeSubscription field.
+func (r *mutationResolver) UpgradeSubscription(ctx context.Context, plan string, paymentMethod string, paymentID string) (*model.CompanySubscription, error) {
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if currentUser.CompanyID == primitive.NilObjectID {
+		return nil, gqlerror.Errorf("User does not have a company yet")
+	}
+
+	if plan == "" {
+		return nil, gqlerror.Errorf("Plan is required")
+	}
+	if paymentMethod == "" {
+		return nil, gqlerror.Errorf("Payment method is required")
+	}
+	if paymentID == "" {
+		return nil, gqlerror.Errorf("Payment ID is required")
+	}
+
+	if _, err := r.DB.GetSubscriptionPlanByID(plan); err != nil {
+		return nil, err
+	}
+
+	if err := r.DB.SetLicenseID(currentUser.CompanyID.Hex(), paymentID); err != nil {
+		return nil, err
+	}
+
+	subscription, err := r.DB.GetCompanySubscription(currentUser.CompanyID.Hex())
+	if err != nil {
+		subscription, err = r.DB.CreateTrialSubscription(currentUser.CompanyID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if subscription.Status != "active" {
+		if err := r.DB.UpdateSubscriptionStatus(subscription.ID.Hex(), "active"); err != nil {
+			return nil, err
+		}
+		subscription.Status = "active"
+	}
+
+	return convertSubscriptionToGraphQL(subscription), nil
+}
+
+// CancelSubscription is the resolver for the cancelSubscription field.
+func (r *mutationResolver) CancelSubscription(ctx context.Context) (bool, error) {
+	currentUser, err := r.RequireAuthenticated(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if currentUser.CompanyID == primitive.NilObjectID {
+		return false, gqlerror.Errorf("User does not have a company yet")
+	}
+
+	if err := r.DB.SetLicenseID(currentUser.CompanyID.Hex(), ""); err != nil {
+		return false, err
+	}
+
+	subscription, err := r.DB.GetCompanySubscription(currentUser.CompanyID.Hex())
+	if err == nil && subscription != nil && subscription.Status != "expired" {
+		if err := r.DB.UpdateSubscriptionStatus(subscription.ID.Hex(), "expired"); err != nil {
+			return false, err
+		}
 	}
 
 	return true, nil
@@ -527,9 +650,8 @@ func (r *mutationResolver) CreateStore(ctx context.Context, input model.CreateSt
 		return nil, gqlerror.Errorf("You must be associated with a company to create stores")
 	}
 
-	// Check subscription limits
-	err = r.DB.CheckSubscriptionLimits(currentUser.CompanyID.Hex(), "create_store")
-	if err != nil {
+	// Check subscription (trial or license)
+	if err := r.CheckSubscription(ctx); err != nil {
 		return nil, err
 	}
 
@@ -2039,80 +2161,6 @@ func (r *mutationResolver) CancelInventory(ctx context.Context, inventoryID stri
 	return convertInventoryToGraphQL(cancelledInventory, r.DB), nil
 }
 
-// CreateSubscription is the resolver for the createSubscription field.
-func (r *mutationResolver) CreateSubscription(ctx context.Context, plan string, paymentMethod string, paymentID string) (*model.CompanySubscription, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if currentUser.CompanyID == primitive.NilObjectID {
-		return nil, gqlerror.Errorf("User does not have a company yet")
-	}
-
-	// Only Admin can create subscriptions
-	if currentUser.Role != "Admin" {
-		return nil, gqlerror.Errorf("Only Admin can create subscriptions")
-	}
-
-	subscription, err := r.DB.CreateSubscription(currentUser.CompanyID.Hex(), plan, paymentMethod, paymentID)
-	if err != nil {
-		return nil, err
-	}
-
-	sub := convertSubscriptionToGraphQL(subscription)
-	return sub, nil
-}
-
-// UpgradeSubscription is the resolver for the upgradeSubscription field.
-func (r *mutationResolver) UpgradeSubscription(ctx context.Context, plan string, paymentMethod string, paymentID string) (*model.CompanySubscription, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if currentUser.CompanyID == primitive.NilObjectID {
-		return nil, gqlerror.Errorf("User does not have a company yet")
-	}
-
-	// Only Admin can upgrade subscriptions
-	if currentUser.Role != "Admin" {
-		return nil, gqlerror.Errorf("Only Admin can upgrade subscriptions")
-	}
-
-	subscription, err := r.DB.UpgradeSubscription(currentUser.CompanyID.Hex(), plan, paymentMethod, paymentID)
-	if err != nil {
-		return nil, err
-	}
-
-	sub := convertSubscriptionToGraphQL(subscription)
-	return sub, nil
-}
-
-// CancelSubscription is the resolver for the cancelSubscription field.
-func (r *mutationResolver) CancelSubscription(ctx context.Context) (bool, error) {
-	currentUser, err := r.RequireAuthenticated(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	if currentUser.CompanyID == primitive.NilObjectID {
-		return false, gqlerror.Errorf("User does not have a company yet")
-	}
-
-	// Only Admin can cancel subscriptions
-	if currentUser.Role != "Admin" {
-		return false, gqlerror.Errorf("Only Admin can cancel subscriptions")
-	}
-
-	err = r.DB.CancelSubscription(currentUser.CompanyID.Hex())
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
 // Me is the resolver for the me field.
 func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
 	user, err := r.GetUserFromContext(ctx)
@@ -2278,9 +2326,17 @@ func (r *queryResolver) CheckSubscriptionStatus(ctx context.Context) (*model.Sub
 
 	if currentUser.CompanyID == primitive.NilObjectID {
 		return &model.SubscriptionStatus{
-			IsValid: false,
-			Message: stringPtr("User does not have a company yet"),
+			IsValid:    false,
+			HasLicense: false,
+			Message:    stringPtr("User does not have a company yet"),
 		}, nil
+	}
+
+	// Check if company has a valid license ID
+	company, err := r.DB.FindCompanyByID(currentUser.CompanyID.Hex())
+	hasLicense := false
+	if err == nil && company != nil && company.LicenseID != nil && *company.LicenseID != "" {
+		hasLicense = true
 	}
 
 	subscriptionService := services.NewSubscriptionService(r.DB)
@@ -2295,6 +2351,7 @@ func (r *queryResolver) CheckSubscriptionStatus(ctx context.Context) (*model.Sub
 	if err != nil {
 		return &model.SubscriptionStatus{
 			IsValid:      false,
+			HasLicense:   hasLicense,
 			Message:      stringPtr(err.Error()),
 			Subscription: subModel,
 		}, nil
@@ -2302,6 +2359,7 @@ func (r *queryResolver) CheckSubscriptionStatus(ctx context.Context) (*model.Sub
 
 	return &model.SubscriptionStatus{
 		IsValid:      true,
+		HasLicense:   hasLicense,
 		Message:      nil,
 		Subscription: subModel,
 	}, nil
@@ -2309,12 +2367,16 @@ func (r *queryResolver) CheckSubscriptionStatus(ctx context.Context) (*model.Sub
 
 // SubscriptionPlans is the resolver for the subscriptionPlans field.
 func (r *queryResolver) SubscriptionPlans(ctx context.Context) ([]*model.SubscriptionPlan, error) {
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+
 	plans, err := r.DB.GetAllSubscriptionPlans()
 	if err != nil {
 		return nil, err
 	}
 
-	var result []*model.SubscriptionPlan
+	result := make([]*model.SubscriptionPlan, 0, len(plans))
 	for _, plan := range plans {
 		result = append(result, convertSubscriptionPlanToGraphQL(plan))
 	}
@@ -2324,8 +2386,8 @@ func (r *queryResolver) SubscriptionPlans(ctx context.Context) ([]*model.Subscri
 
 // SubscriptionPlan is the resolver for the subscriptionPlan field.
 func (r *queryResolver) SubscriptionPlan(ctx context.Context, id string) (*model.SubscriptionPlan, error) {
-	if id == "" {
-		return nil, gqlerror.Errorf("Plan ID cannot be empty")
+	if _, err := r.RequireAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
 	plan, err := r.DB.GetSubscriptionPlanByID(id)

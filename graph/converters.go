@@ -93,6 +93,7 @@ func convertCompanyToGraphQL(dbCompany *database.Company, db *database.DB, loadS
 		Rccm:          dbCompany.Rccm,
 		IDNat:         dbCompany.IDNat,
 		IDCommerce:    dbCompany.IDCommerce,
+		LicenseID:     dbCompany.LicenseID,
 		Stores:        storeModels,
 		Subscription:  subscriptionModel,
 		ExchangeRates: exchangeRateModels,
@@ -109,62 +110,30 @@ func convertSubscriptionToGraphQL(dbSubscription *database.Subscription) *model.
 
 	// Calculate days remaining and trial expiration
 	now := time.Now()
-	var endDate time.Time
+	endDate := dbSubscription.TrialEndDate
+	isTrialExpired := now.After(endDate)
+	
 	var daysRemaining int
-	var isTrialExpired bool
-
-	if dbSubscription.Plan == "trial" {
-		endDate = dbSubscription.TrialEndDate
-		isTrialExpired = now.After(endDate)
-	} else if dbSubscription.SubscriptionEndDate != nil {
-		endDate = *dbSubscription.SubscriptionEndDate
-		isTrialExpired = false
-	} else {
-		daysRemaining = 0
-		isTrialExpired = dbSubscription.Plan == "trial" && now.After(dbSubscription.TrialEndDate)
-	}
-
-	if !isTrialExpired && !endDate.IsZero() {
-		if now.Before(endDate) {
-			diff := endDate.Sub(now)
-			daysRemaining = int(diff.Hours() / 24)
-			if daysRemaining < 0 {
-				daysRemaining = 0
-			}
-		} else {
+	if !isTrialExpired && now.Before(endDate) {
+		diff := endDate.Sub(now)
+		daysRemaining = int(diff.Hours() / 24)
+		if daysRemaining < 0 {
 			daysRemaining = 0
 		}
-	}
-
-	var subscriptionStartDate *string
-	if dbSubscription.SubscriptionStartDate != nil {
-		dateStr := dbSubscription.SubscriptionStartDate.Format(time.RFC3339)
-		subscriptionStartDate = &dateStr
-	}
-
-	var subscriptionEndDate *string
-	if dbSubscription.SubscriptionEndDate != nil {
-		dateStr := dbSubscription.SubscriptionEndDate.Format(time.RFC3339)
-		subscriptionEndDate = &dateStr
+	} else {
+		daysRemaining = 0
 	}
 
 	return &model.CompanySubscription{
-		ID:                    dbSubscription.ID.Hex(),
-		CompanyID:             dbSubscription.CompanyID.Hex(),
-		Plan:                  dbSubscription.Plan,
-		Status:                dbSubscription.Status,
-		TrialStartDate:        dbSubscription.TrialStartDate.Format(time.RFC3339),
-		TrialEndDate:          dbSubscription.TrialEndDate.Format(time.RFC3339),
-		SubscriptionStartDate: subscriptionStartDate,
-		SubscriptionEndDate:   subscriptionEndDate,
-		PaymentMethod:         dbSubscription.PaymentMethod,
-		PaymentID:             dbSubscription.PaymentID,
-		MaxStores:             dbSubscription.MaxStores,
-		MaxUsers:              dbSubscription.MaxUsers,
-		DaysRemaining:         daysRemaining,
-		IsTrialExpired:        isTrialExpired,
-		CreatedAt:             dbSubscription.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:             dbSubscription.UpdatedAt.Format(time.RFC3339),
+		ID:             dbSubscription.ID.Hex(),
+		CompanyID:      dbSubscription.CompanyID.Hex(),
+		Status:         dbSubscription.Status,
+		TrialStartDate: dbSubscription.TrialStartDate.Format(time.RFC3339),
+		TrialEndDate:   dbSubscription.TrialEndDate.Format(time.RFC3339),
+		DaysRemaining:  daysRemaining,
+		IsTrialExpired: isTrialExpired,
+		CreatedAt:      dbSubscription.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:      dbSubscription.UpdatedAt.Format(time.RFC3339),
 	}
 }
 

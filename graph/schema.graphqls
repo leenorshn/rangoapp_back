@@ -41,8 +41,9 @@ type Company {
   rccm: String
   idNat: String
   idCommerce: String
+  licenseId: String # ID de licence pour l'exploitation annuelle (null si pas de licence)
   stores: [Store!]! # Liste des boutiques de l'entreprise
-  subscription: CompanySubscription! # Abonnement de l'entreprise
+  subscription: CompanySubscription! # Abonnement de l'entreprise (trial)
   exchangeRates: [ExchangeRate!]! # Taux de change configurés pour l'entreprise
   createdAt: String!
   updatedAt: String!
@@ -52,7 +53,6 @@ type Store {
   id: ID!
   name: String!
   address: String!
-  phone: String!
   companyId: String!
   company: Company!
   defaultCurrency: String! # Currency par défaut de la boutique (ex: "USD", "CDF")
@@ -154,17 +154,10 @@ type AuthResponse {
 type CompanySubscription {
   id: ID!
   companyId: String!
-  plan: String! # "trial", "starter", "business", "enterprise"
-  status: String! # "active", "expired", "cancelled", "suspended"
+  status: String! # "active", "expired"
   trialStartDate: String!
   trialEndDate: String!
-  subscriptionStartDate: String
-  subscriptionEndDate: String
-  paymentMethod: String
-  paymentId: String
-  maxStores: Int!
-  maxUsers: Int!
-  daysRemaining: Int! # Jours restants dans l'essai ou l'abonnement
+  daysRemaining: Int! # Jours restants dans l'essai
   isTrialExpired: Boolean!
   createdAt: String!
   updatedAt: String!
@@ -174,18 +167,19 @@ type SubscriptionStatus {
   isValid: Boolean!
   message: String
   subscription: CompanySubscription
+  hasLicense: Boolean! # Indique si l'entreprise a une licence annuelle valide
 }
 
 type SubscriptionPlan {
   id: ID!
   name: String!
   price: Float!
-  currency: String!  # "USD", "EUR", "CDF", etc.
-  billingPeriod: String!  # "monthly", "yearly"
+  currency: String!
+  billingPeriod: String!
   description: String!
   features: [String!]!
-  maxStores: Int  # null = illimité
-  maxUsers: Int   # null = illimité
+  maxStores: Int
+  maxUsers: Int
   isActive: Boolean!
   createdAt: String!
   updatedAt: String!
@@ -569,6 +563,7 @@ input UpdateCompanyInput {
   rccm: String
   idNat: String
   idCommerce: String
+  licenseId: String # ID de licence pour l'exploitation annuelle
 }
 
 input CreateStoreInput {
@@ -728,10 +723,8 @@ type Query {
   # Subscription
   subscription: CompanySubscription! @auth
   checkSubscriptionStatus: SubscriptionStatus! @auth
-  
-  # Subscription Plans
-  subscriptionPlans: [SubscriptionPlan!]! # Public query, no auth required
-  subscriptionPlan(id: ID!): SubscriptionPlan # Public query, no auth required
+  subscriptionPlans: [SubscriptionPlan!]! @auth
+  subscriptionPlan(id: ID!): SubscriptionPlan @auth
   
   # Stores
   stores: [Store!]! @auth
@@ -932,7 +925,7 @@ type Mutation {
   completeInventory(inventoryId: ID!, adjustStock: Boolean!): Inventory! @auth # Compléter l'inventaire (optionnel: ajuster le stock automatiquement)
   cancelInventory(inventoryId: ID!): Inventory! @auth # Annuler un inventaire
   
-  # Subscription
+  # Subscription (simplified - only trial, license managed separately)
   createSubscription(plan: String!, paymentMethod: String!, paymentId: String!): CompanySubscription! @auth
   upgradeSubscription(plan: String!, paymentMethod: String!, paymentId: String!): CompanySubscription! @auth
   cancelSubscription: Boolean! @auth

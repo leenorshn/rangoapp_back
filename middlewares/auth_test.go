@@ -139,9 +139,7 @@ func TestAuthMiddleware_OPTIONSRequest(t *testing.T) {
 
 func TestAuthMiddleware_NoAuthHeader(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
-	rr := httptest.NewRecorder()
-
-	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rr := httptest.NewRecorder()	handler := AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

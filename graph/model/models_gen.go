@@ -99,7 +99,8 @@ type Company struct {
 	Logo          *string              `json:"logo,omitempty"`
 	Rccm          *string              `json:"rccm,omitempty"`
 	IDNat         *string              `json:"idNat,omitempty"`
-	IDCommerce    *string              `json:"idCommerce,omitempty"`
+	IDCommerce    *string  `json:"idCommerce,omitempty"`
+	LicenseID     *string  `json:"licenseId,omitempty"`
 	Stores        []*Store             `json:"stores"`
 	Subscription  *CompanySubscription `json:"subscription"`
 	ExchangeRates []*ExchangeRate      `json:"exchangeRates"`
@@ -630,6 +631,7 @@ type SubscriptionStatus struct {
 	IsValid      bool                 `json:"isValid"`
 	Message      *string              `json:"message,omitempty"`
 	Subscription *CompanySubscription `json:"subscription,omitempty"`
+	HasLicense   bool                 `json:"hasLicense"`
 }
 
 type UpdateClientInput struct {
@@ -649,6 +651,7 @@ type UpdateCompanyInput struct {
 	Rccm        *string `json:"rccm,omitempty"`
 	IDNat       *string `json:"idNat,omitempty"`
 	IDCommerce  *string `json:"idCommerce,omitempty"`
+	LicenseID   *string `json:"licenseId,omitempty"`
 }
 
 type UpdateFactureInput struct {

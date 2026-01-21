@@ -7,7 +7,6 @@ import (
 	"rangoapp/database"
 	"rangoapp/utils"
 
-	"github.com/vektah/gqlparser/v2/gqlerror"
 )
 
 type SubscriptionService struct {
@@ -41,42 +40,16 @@ func (s *SubscriptionService) CheckExpiredTrials() error {
 }
 
 // ValidateSubscription checks if a company's subscription is valid
+// Returns nil if company has valid license ID or active trial
 func (s *SubscriptionService) ValidateSubscription(ctx context.Context, companyID string) error {
-	subscription, err := s.db.GetCompanySubscription(companyID)
-	if err != nil {
-		return err
-	}
-
-	// Check if trial is expired
-	if subscription.Plan == "trial" && time.Now().After(subscription.TrialEndDate) {
-		return gqlerror.Errorf("Trial period expired. Please subscribe to continue.")
-	}
-
-	// Check if subscription is active
-	if subscription.Status != "active" {
-		return gqlerror.Errorf("Subscription is not active. Please renew your subscription.")
-	}
-
-	// Check if paid subscription is expired
-	if subscription.SubscriptionEndDate != nil && time.Now().After(*subscription.SubscriptionEndDate) {
-		return gqlerror.Errorf("Subscription has expired. Please renew your subscription.")
-	}
-
-	return nil
+	// Use the simplified CheckSubscription from database
+	return s.db.CheckSubscription(companyID)
 }
 
-// GetDaysRemaining calculates days remaining in trial or subscription
+// GetDaysRemaining calculates days remaining in trial
 func (s *SubscriptionService) GetDaysRemaining(subscription *database.Subscription) int {
 	now := time.Now()
-	var endDate time.Time
-
-	if subscription.Plan == "trial" {
-		endDate = subscription.TrialEndDate
-	} else if subscription.SubscriptionEndDate != nil {
-		endDate = *subscription.SubscriptionEndDate
-	} else {
-		return 0
-	}
+	endDate := subscription.TrialEndDate
 
 	if now.After(endDate) {
 		return 0
@@ -92,9 +65,6 @@ func (s *SubscriptionService) GetDaysRemaining(subscription *database.Subscripti
 
 // IsTrialExpired checks if trial period is expired
 func (s *SubscriptionService) IsTrialExpired(subscription *database.Subscription) bool {
-	if subscription.Plan != "trial" {
-		return false
-	}
 	return time.Now().After(subscription.TrialEndDate)
 }
 

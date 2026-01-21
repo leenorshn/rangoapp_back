@@ -175,9 +175,7 @@ func (db *DB) GetClientCurrentDebt(clientID string) (float64, error) {
 
 	debtCollection := colHelper(db, "debts")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Agréger toutes les dettes impayées du client
+	defer cancel()	// Agréger toutes les dettes impayées du client
 	pipeline := []bson.M{
 		{
 			"$match": bson.M{
