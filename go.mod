@@ -3,49 +3,38 @@ module rangoapp
 go 1.24.0
 
 require (
-	github.com/99designs/gqlgen v0.17.49
-	github.com/dgrijalva/jwt-go v3.2.0+incompatible
+	github.com/aws/aws-sdk-go-v2 v1.47.3
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
+	github.com/aws/smithy-go v1.28.5
+	github.com/fergusstrange/embedded-postgres v1.32.0
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/mux v1.8.1
-	github.com/joho/godotenv v1.5.1
-	github.com/kevinburke/twilio-go v0.0.0-20240623211326-c7334b537077
-	github.com/rs/cors v1.11.1
-	github.com/stretchr/testify v1.9.0
-	github.com/vektah/gqlparser/v2 v2.5.16
-	go.mongodb.org/mongo-driver v1.15.1
-	golang.org/x/crypto v0.43.0
+	github.com/graphql-go/graphql v0.8.1
+	github.com/jackc/pgx/v5 v5.7.4
+	github.com/shopspring/decimal v1.4.0
+	google.golang.org/grpc v1.71.0
+	google.golang.org/protobuf v1.36.6
 )
 
 require (
-	github.com/agnivade/levenshtein v1.1.1 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/gofrs/uuid v4.4.0+incompatible // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/golang/snappy v0.0.1 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/kevinburke/go-types v0.0.0-20210723172823-2deba1f80ba7 // indirect
-	github.com/kevinburke/rest v0.0.0-20240617045629-3ed0ad3487f0 // indirect
-	github.com/klauspost/compress v1.13.6 // indirect
-	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/montanaflynn/stats v0.0.0-20171201202039-1bf9dbcd8cbe // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/sosodev/duration v1.3.1 // indirect
-	github.com/ttacon/builder v0.0.0-20170518171403-c099f663e1c2 // indirect
-	github.com/ttacon/libphonenumber v1.2.1 // indirect
-	github.com/urfave/cli/v2 v2.27.2 // indirect
-	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.1.2 // indirect
-	github.com/xdg-go/stringprep v1.0.4 // indirect
-	github.com/xrash/smetrics v0.0.0-20240312152122-5f08fbb34913 // indirect
-	github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d // indirect
-	golang.org/x/mod v0.29.0 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.22 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.6 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.6 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.6 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.21 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.6 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.6 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/lib/pq v1.10.9 // indirect
+	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
+	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
-	golang.org/x/tools v0.38.0 // indirect
-	google.golang.org/protobuf v1.34.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
 )

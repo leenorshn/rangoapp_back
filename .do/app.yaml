@@ -21,26 +21,33 @@ services:
     envs:
       - key: PORT
         value: "8080"
-      - key: MONGO_URI
+      - key: DATABASE_URL
         scope: RUN_TIME
         type: SECRET
-      - key: MONGO_DB_NAME
+      - key: DATABASE_URL_APP
         scope: RUN_TIME
         type: SECRET
-      - key: JWT_SECRET
+      - key: DATABASE_URL_IDENTITY
         scope: RUN_TIME
         type: SECRET
-      - key: ALLOWED_ORIGINS
+      - key: INTERNAL_CONTEXT_SECRET
         scope: RUN_TIME
         type: SECRET
-      - key: LOG_LEVEL
-        value: "INFO"
-      - key: DB_TIMEOUT_SECONDS
-        value: "5"
-      - key: DB_CONNECT_TIMEOUT_SECONDS
-        value: "10"
-      - key: DB_MAX_RETRIES
-        value: "3"
+      - key: CLERK_WEBHOOK_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: CLERK_JWKS_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: CLERK_ISSUER
+        scope: RUN_TIME
+        type: SECRET
+      - key: CLERK_AUTHORIZED_PARTIES
+        scope: RUN_TIME
+        type: SECRET
+      - key: COMMERCE_GRPC_ADDR
+        scope: RUN_TIME
+        type: SECRET
     routes:
       - path: /
     cors:

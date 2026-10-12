@@ -75,19 +75,21 @@ Dans App Platform, ajoutez ces variables d'environnement:
 
 **Obligatoires:**
 ```
-MONGO_URI=mongodb+srv://user:password@cluster.mongodb.net/rangodb?retryWrites=true&w=majority
-MONGO_DB_NAME=rangodb
-JWT_SECRET=votre-secret-jwt-tres-long-et-securise
-ALLOWED_ORIGINS=https://votre-frontend.vercel.app
+DATABASE_URL=postgres://easystock_migrator:change-me@host:5432/easystock?sslmode=require
+DATABASE_URL_APP=postgres://easystock_app:change-me@host:5432/easystock?sslmode=require
+DATABASE_URL_IDENTITY=postgres://easystock_identity:change-me@host:5432/easystock?sslmode=require
+INTERNAL_CONTEXT_SECRET=change-me-to-a-random-string-of-32-or-more
+CLERK_JWKS_URL=https://example.clerk.accounts.dev/.well-known/jwks.json
+CLERK_ISSUER=https://example.clerk.accounts.dev
+CLERK_AUTHORIZED_PARTIES=https://app.example.com
+CLERK_WEBHOOK_SECRET=whsec_change_me
+COMMERCE_GRPC_ADDR=127.0.0.1:7443
 ```
 
 **Optionnelles:**
 ```
 PORT=8080
-LOG_LEVEL=INFO
-DB_TIMEOUT_SECONDS=5
-DB_CONNECT_TIMEOUT_SECONDS=10
-DB_MAX_RETRIES=3
+GRPC_TLS_CA=/secrets/grpc-ca.pem
 ```
 
 #### 5. Configurer le Health Check
@@ -193,7 +195,7 @@ Créez le fichier `.env`:
 nano .env
 ```
 
-Ajoutez toutes vos variables d'environnement (MONGO_URI, JWT_SECRET, etc.)
+Ajoutez les variables PostgreSQL et Clerk (`DATABASE_URL`, `CLERK_JWKS_URL`, `INTERNAL_CONTEXT_SECRET`, etc.)
 
 #### 5. Configurer le Firewall
 
@@ -379,8 +381,8 @@ docker logs rangoapp-backend
 # Vérifier les variables d'environnement
 docker exec rangoapp-backend env
 
-# Vérifier la connexion MongoDB
-docker exec rangoapp-backend ping -c 3 your-mongodb-host
+# Vérifier que l'API répond
+curl -fsS http://localhost:8080/health
 ```
 
 ### Problèmes de connexion

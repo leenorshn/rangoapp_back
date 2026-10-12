@@ -1,0 +1,18 @@
+version: "2"
+sql:
+  - engine: postgresql
+    queries: internal/easystock/db/query
+    schema: internal/easystock/migrate/sql/000001_schema.up.sql
+    gen:
+      go:
+        package: dbsql
+        out: internal/easystock/db/dbsql
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: uuid
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+          - db_type: pg_catalog.numeric
+            go_type: string

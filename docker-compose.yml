@@ -1,0 +1,144 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: easystock_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-easystock-dev-only}
+      POSTGRES_DB: easystock
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easystock_migrator -d easystock"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+    stop_grace_period: 20s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.easystock
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://easystock_migrator:${POSTGRES_PASSWORD:-easystock-dev-only}@postgres:5432/easystock?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    restart: "no"
+
+  roles:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: easystock_migrator
+      PGDATABASE: easystock
+      PGPASSWORD: ${POSTGRES_PASSWORD:-easystock-dev-only}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-easystock-app-dev}
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:-easystock-identity-dev}
+      JOB_DB_PASSWORD: ${JOB_DB_PASSWORD:-easystock-job-dev}
+    command:
+      - sh
+      - -c
+      - |
+        psql -v ON_ERROR_STOP=1 \
+          -v app="$$APP_DB_PASSWORD" \
+          -v identity="$$IDENTITY_DB_PASSWORD" \
+          -v job="$$JOB_DB_PASSWORD" <<'SQL'
+        ALTER ROLE easystock_app PASSWORD :'app';
+        ALTER ROLE easystock_identity PASSWORD :'identity';
+        ALTER ROLE easystock_job PASSWORD :'job';
+        SQL
+    entrypoint: []
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    restart: "no"
+
+  grpc:
+    build:
+      context: .
+      dockerfile: Dockerfile.easystock
+    command: ["grpc"]
+    environment:
+      DATABASE_URL_APP: postgres://easystock_app:${APP_DB_PASSWORD:-easystock-app-dev}@postgres:5432/easystock?sslmode=disable
+      INTERNAL_CONTEXT_SECRET: ${INTERNAL_CONTEXT_SECRET:-dev-only-internal-context-secret-32}
+      GRPC_LISTEN: 0.0.0.0:7443
+      GRPC_INSECURE_DEV: "true"
+    depends_on:
+      roles:
+        condition: service_completed_successfully
+    networks: [internal]
+    stop_grace_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.easystock
+    command: ["api"]
+    environment:
+      PORT: "8080"
+      DATABASE_URL_IDENTITY: postgres://easystock_identity:${IDENTITY_DB_PASSWORD:-easystock-identity-dev}@postgres:5432/easystock?sslmode=disable
+      DATABASE_URL_APP: postgres://easystock_app:${APP_DB_PASSWORD:-easystock-app-dev}@postgres:5432/easystock?sslmode=disable
+      COMMERCE_GRPC_ADDR: grpc:7443
+      INTERNAL_CONTEXT_SECRET: ${INTERNAL_CONTEXT_SECRET:-dev-only-internal-context-secret-32}
+      GRPC_INSECURE_DEV: "true"
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
+      GRAPHQL_PLAYGROUND: "true"
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: easystock
+      S3_ACCESS_KEY_ID: easystock
+      S3_SECRET_ACCESS_KEY: easystock-dev-only
+      S3_USE_PATH_STYLE: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      roles:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    networks: [internal]
+    stop_grace_period: 20s
+
+  minio:
+    image: pgsty/silo:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: easystock
+      MINIO_ROOT_PASSWORD: easystock-dev-only
+    volumes:
+      - miniodata:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+    networks: [internal]
+
+  minio-init:
+    image: pgsty/mc:latest
+    depends_on: [minio]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        i=0
+        until mc alias set local http://minio:9000 easystock easystock-dev-only; do
+          i=$$((i+1))
+          if [ "$$i" -gt 30 ]; then exit 1; fi
+          sleep 1
+        done
+        mc mb -p local/easystock || true
+    networks: [internal]
+    restart: "no"
+
+networks:
+  internal:
+
+volumes:
+  pgdata:
+  miniodata:

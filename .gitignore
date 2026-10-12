@@ -30,14 +30,16 @@ go.work
 .DS_Store
 Thumbs.db
 
-# Compiled scripts
-scripts/create_trial_subscriptions
-scripts/extend_subscriptions
-scripts/add_trial_to_all_companies
-scripts/update_stores_currencies
+# Secrets
+.env
+.env.*
+!.env.example
 
 # Main binary
 rangoapp
+easystock
+.cache/
+data/
 
 
 

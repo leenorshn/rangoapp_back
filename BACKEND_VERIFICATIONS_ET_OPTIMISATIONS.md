@@ -1,3 +1,7 @@
+# Vérifications de l'ancien serveur
+
+Ce document décrit l'ancien backend, retiré du dépôt. La base actuelle est PostgreSQL, via `cmd/easystock`.
+
 # 🔍 Vérifications et Optimisations Backend - RangoApp
 
 **Date**: $(date)

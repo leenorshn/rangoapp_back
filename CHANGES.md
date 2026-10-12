@@ -1,3 +1,7 @@
+# Changelog de l'ancien serveur
+
+Ce document décrit l'ancien backend, retiré du dépôt. La base actuelle est PostgreSQL, via `cmd/easystock`.
+
 # Changelog - Système de Devises et Taux de Change
 
 ## Version 2.0.0 - 17 Décembre 2024

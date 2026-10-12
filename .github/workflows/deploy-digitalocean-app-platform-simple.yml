@@ -26,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
 
       - name: Run tests
         run: go test ./... -v
@@ -35,13 +35,13 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
             -ldflags='-w -s' \
-            -o server \
-            ./server.go
+            -o easystock \
+            ./cmd/easystock
 
       - name: Create deployment package
         run: |
           mkdir -p deploy
-          cp server deploy/
+          cp easystock deploy/
           cp Dockerfile.digitalocean deploy/Dockerfile
           cp go.mod deploy/
           cp go.sum deploy/

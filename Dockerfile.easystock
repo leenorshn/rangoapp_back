@@ -1,0 +1,14 @@
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+RUN apk add --no-cache git ca-certificates
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /easystock ./cmd/easystock
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /easystock /easystock
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/easystock"]
+CMD ["api"]

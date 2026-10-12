@@ -1,3 +1,7 @@
+# Améliorations du système de taux de change (ancien serveur)
+
+Ce document décrit l'ancien backend, retiré du dépôt. La base actuelle est PostgreSQL, via `cmd/easystock`.
+
 # Améliorations du Système de Taux de Change
 
 ## 📋 Vue d'ensemble

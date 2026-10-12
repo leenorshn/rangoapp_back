@@ -1,3 +1,7 @@
+# État d'implémentation de l'ancien serveur
+
+Ce document décrit l'ancien backend, retiré du dépôt. La base actuelle est PostgreSQL, via `cmd/easystock`.
+
 # 📊 État d'Implémentation Backend - RangoApp
 
 **Date de mise à jour**: $(date)
