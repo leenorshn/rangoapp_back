@@ -1,0 +1,329 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"rangoapp/internal/easystock/api"
+	"rangoapp/internal/easystock/catalog"
+	"rangoapp/internal/easystock/clerkauth"
+	"rangoapp/internal/easystock/commerce"
+	"rangoapp/internal/easystock/grpcserver"
+	"rangoapp/internal/easystock/identity"
+	"rangoapp/internal/easystock/legacyimport"
+	"rangoapp/internal/easystock/media"
+	"rangoapp/internal/easystock/migrate"
+	"rangoapp/internal/easystock/readmodel"
+	"rangoapp/internal/easystock/reports"
+	"rangoapp/internal/easystock/subscription"
+	"rangoapp/internal/easystock/tenant"
+
+	commercev1 "rangoapp/internal/easystock/gen/commercev1"
+	subscriptionv1 "rangoapp/internal/easystock/gen/subscriptionv1"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatal("usage: easystock [migrate|grpc|api|import]")
+	}
+	ctx := context.Background()
+	switch os.Args[1] {
+	case "migrate":
+		pool := mustPool(ctx, "DATABASE_URL")
+		defer pool.Close()
+		if err := migrate.Up(ctx, pool); err != nil {
+			log.Fatal(err)
+		}
+	case "grpc":
+		serveGRPC(ctx)
+	case "api":
+		serveAPI(ctx)
+	case "import":
+		runImport(ctx)
+	default:
+		log.Fatal("unknown command")
+	}
+}
+
+func serveGRPC(ctx context.Context) {
+	addr := env("GRPC_LISTEN", "127.0.0.1:7443")
+	if os.Getenv("GRPC_INSECURE_DEV") != "true" && os.Getenv("GRPC_TLS_CERT") == "" && !isLoopback(addr) {
+		log.Fatal("gRPC refuses a non-loopback listen without TLS; set GRPC_TLS_CERT or GRPC_INSECURE_DEV for a private network")
+	}
+	pool := mustPool(ctx, "DATABASE_URL_APP")
+	defer pool.Close()
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	server := grpc.NewServer(
+		grpc.MaxRecvMsgSize(1<<20),
+		grpc.MaxSendMsgSize(1<<20),
+		grpc.ChainUnaryInterceptor(
+			grpcserver.RecoveryInterceptor,
+			grpcserver.LoggingInterceptor,
+			grpcserver.AuthInterceptor(mustSecret("INTERNAL_CONTEXT_SECRET")),
+		),
+	)
+	commercev1.RegisterCommerceServiceServer(server, grpcserver.NewCommerce(commerce.New(pool)))
+	subscriptionv1.RegisterSubscriptionServiceServer(server, grpcserver.NewSubscription(subscription.New(pool, nil)))
+	healthServer := health.NewServer()
+	healthpb.RegisterHealthServer(server, healthServer)
+	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	go func() {
+		log.Printf("easystock grpc listening on %s", addr)
+		if err := server.Serve(lis); err != nil {
+			log.Fatal(err)
+		}
+	}()
+	waitForSignal()
+	stopped := make(chan struct{})
+	go func() {
+		server.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(20 * time.Second):
+		server.Stop()
+	}
+}
+
+func serveAPI(ctx context.Context) {
+	pool := mustPool(ctx, "DATABASE_URL_IDENTITY")
+	defer pool.Close()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.Handle("POST /webhooks/clerk", clerkHandler(identity.New(pool)))
+	mux.Handle("POST /graphql", graphQLHandler(ctx, identity.New(pool)))
+	if os.Getenv("GRAPHQL_PLAYGROUND") == "true" {
+		mux.Handle("GET /playground", api.Playground("EasyStock", "/graphql"))
+	}
+	server := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		log.Printf("easystock api listening on %s", server.Addr)
+		if os.Getenv("GRAPHQL_PLAYGROUND") == "true" {
+			log.Printf("GraphQL playground: http://localhost:%s/playground", env("PORT", "8080"))
+		}
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+	waitForSignal()
+	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = server.Shutdown(shutdown)
+}
+
+func clerkHandler(svc *identity.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := identity.VerifySvix(os.Getenv("CLERK_WEBHOOK_SECRET"), r.Header.Get("svix-id"), r.Header.Get("svix-timestamp"), r.Header.Get("svix-signature"), body, time.Now()); err != nil {
+			http.Error(w, "invalid signature", http.StatusUnauthorized)
+			return
+		}
+		event, err := identity.ParseEvent(r.Header.Get("svix-id"), r.Header.Get("svix-timestamp"), body)
+		if err != nil {
+			http.Error(w, "invalid event", http.StatusBadRequest)
+			return
+		}
+		if err := svc.Apply(r.Context(), event); err != nil {
+			http.Error(w, "retry", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+func graphQLHandler(ctx context.Context, members *identity.Service) http.Handler {
+	deps := api.Deps{ContextSecret: os.Getenv("INTERNAL_CONTEXT_SECRET"), Identity: members}
+	if os.Getenv("DATABASE_URL_APP") != "" {
+		appPool := mustPool(ctx, "DATABASE_URL_APP")
+		deps.Commerce = commerce.New(appPool)
+		if store, err := mediaStore(); err != nil {
+			log.Fatal(err)
+		} else if store != nil {
+			deps.Commerce.SetObjects(store)
+		}
+		deps.Reads = readmodel.New(appPool)
+		deps.Reports = reports.New(appPool)
+		deps.Catalog = func(ctx context.Context, p tenant.Principal, after time.Time, afterID uuid.UUID, limit int) ([]catalog.Change, error) {
+			tx, err := appPool.Begin(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defer tx.Rollback(ctx)
+			if err := tenant.Set(ctx, tx, p); err != nil {
+				return nil, err
+			}
+			rows, err := catalog.Changes(ctx, tx, after, afterID, limit)
+			if err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return rows, nil
+		}
+	}
+	if addr := os.Getenv("COMMERCE_GRPC_ADDR"); addr != "" {
+		conn := mustCommerceConn(addr)
+		deps.Sales = commercev1.NewCommerceServiceClient(conn)
+		deps.Plans = subscriptionv1.NewSubscriptionServiceClient(conn)
+	}
+	schema, err := api.Schema(deps)
+	if err != nil {
+		log.Fatal(err)
+	}
+	session := api.SessionConfig{
+		Identity:           members,
+		Issuer:             os.Getenv("CLERK_ISSUER"),
+		Parties:            strings.Split(os.Getenv("CLERK_AUTHORIZED_PARTIES"), ","),
+		AllowIntrospection: os.Getenv("GRAPHQL_PLAYGROUND") == "true",
+	}
+	if rawURL := os.Getenv("CLERK_JWKS_URL"); rawURL != "" {
+		keyfn, err := clerkauth.FetchKeyfunc(ctx, rawURL, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		session.Keyfunc = keyfn
+	}
+	return api.NewHTTP(schema, session)
+}
+
+func mediaStore() (media.Store, error) {
+	bucket := os.Getenv("S3_BUCKET")
+	if bucket == "" {
+		return nil, nil
+	}
+	pathStyle := os.Getenv("S3_USE_PATH_STYLE") == "true"
+	return media.OpenS3(media.Config{
+		Endpoint:  os.Getenv("S3_ENDPOINT"),
+		Region:    env("S3_REGION", "us-east-1"),
+		Bucket:    bucket,
+		AccessKey: os.Getenv("S3_ACCESS_KEY_ID"),
+		SecretKey: os.Getenv("S3_SECRET_ACCESS_KEY"),
+		PathStyle: pathStyle,
+	})
+}
+
+func mustCommerceConn(addr string) *grpc.ClientConn {
+	var creds credentials.TransportCredentials
+	if ca := os.Getenv("GRPC_TLS_CA"); ca != "" {
+		loaded, err := credentials.NewClientTLSFromFile(ca, "")
+		if err != nil {
+			log.Fatal(err)
+		}
+		creds = loaded
+	} else if os.Getenv("GRPC_INSECURE_DEV") == "true" || isLoopback(addr) {
+		creds = insecure.NewCredentials()
+	} else {
+		log.Fatal("COMMERCE_GRPC_ADDR requires GRPC_TLS_CA, or GRPC_INSECURE_DEV on a private network")
+	}
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return conn
+}
+
+func runImport(ctx context.Context) {
+	dry := false
+	path := ""
+	for _, arg := range os.Args[2:] {
+		if arg == "--dry-run" {
+			dry = true
+			continue
+		}
+		path = arg
+	}
+	if path == "" {
+		log.Fatal("usage: easystock import [--dry-run] bundle.json")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var bundle legacyimport.Bundle
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		log.Fatal(err)
+	}
+	pool := mustPool(ctx, "DATABASE_URL")
+	defer pool.Close()
+	report, err := legacyimport.Apply(ctx, pool, bundle, dry)
+	if err != nil {
+		log.Fatal(err)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report); err != nil {
+		log.Fatal(err)
+	}
+	for _, total := range report.Totals {
+		if !total.Match {
+			os.Exit(2)
+		}
+	}
+}
+
+func mustPool(ctx context.Context, key string) *pgxpool.Pool {
+	pool, err := pgxpool.New(ctx, os.Getenv(key))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return pool
+}
+
+func mustSecret(key string) string {
+	value := os.Getenv(key)
+	if len(value) < 32 {
+		log.Fatalf("%s must be at least 32 characters", key)
+	}
+	return value
+}
+
+func env(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func waitForSignal() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	<-ch
+}

@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package easystock.commerce.v1;
+
+option go_package = "rangoapp/internal/easystock/gen/commercev1;commercev1";
+
+// CommerceService is the internal write boundary for stock, sales, debts and cash.
+// Callers send a signed context, not a bare company id.
+service CommerceService {
+  rpc ConfirmSale(ConfirmSaleRequest) returns (ConfirmSaleResponse);
+  rpc PayDebt(PayDebtRequest) returns (PayDebtResponse);
+  rpc CreateRefund(CreateRefundRequest) returns (CreateRefundResponse);
+}
+
+message SaleLine {
+  string product_id = 1;
+  string unit_name = 2;
+  string quantity = 3;
+  string expected_unit_price = 4;
+}
+
+message Payment {
+  string method = 1;
+  string amount = 2;
+  string external_reference = 3;
+}
+
+message ConfirmSaleRequest {
+  string idempotency_key = 1;
+  string store_id = 2;
+  string customer_id = 3;
+  string currency = 4;
+  repeated SaleLine lines = 5;
+  repeated Payment payments = 6;
+  string cash_session_id = 7;
+  string discount_amount = 8;
+  string client_draft_id = 9;
+}
+
+message ConfirmSaleResponse {
+  string sale_id = 1;
+  string currency = 2;
+  string net_amount = 3;
+  string paid_amount = 4;
+  string due_amount = 5;
+  string debt_id = 6;
+}
+
+message PayDebtRequest {
+  string idempotency_key = 1;
+  string debt_id = 2;
+  string amount = 3;
+  string method = 4;
+  string cash_session_id = 5;
+  string external_reference = 6;
+}
+
+message PayDebtResponse {
+  string debt_id = 1;
+  string due_amount = 2;
+  string paid_amount = 3;
+}
+
+message RefundLine {
+  string sale_item_id = 1;
+  string quantity = 2;
+  bool restock = 3;
+}
+
+message CreateRefundRequest {
+  string idempotency_key = 1;
+  string sale_id = 2;
+  string reason = 3;
+  string cash_session_id = 4;
+  repeated RefundLine lines = 5;
+}
+
+message CreateRefundResponse {
+  string refund_id = 1;
+  string amount = 2;
+  string cash_amount = 3;
+  string debt_amount = 4;
+}

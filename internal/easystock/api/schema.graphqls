@@ -1,0 +1,252 @@
+# Contract for POST /graphql. The executable schema is graphql.go.
+# Amounts and quantities are decimal strings, never floats.
+# Dates use the DateTime scalar (RFC3339).
+
+type Query {
+  subscription: Subscription!
+  catalogChanges(after: DateTime, afterId: ID, limit: Int): [CatalogChange!]!
+  registration: Registration!
+  invitations: [Invitation!]!
+  sales(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [Sale!]!
+  customers(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [Customer!]!
+  debts(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [Debt!]!
+  stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
+  cash(storeId: ID!): [CashRegister!]!
+  reports(storeId: ID, currency: String!, from: DateTime!, to: DateTime!): ShopReport!
+}
+
+type Mutation {
+  confirmSale(input: ConfirmSaleInput!): SaleResult!
+  createCompany(input: CreateCompanyInput!): CompanyCreated!
+  inviteMember(input: InviteMemberInput!): Invitation!
+  revokeInvitation(id: ID!): Boolean!
+  acceptInvitation(token: String!): Membership!
+}
+
+type Subscription {
+  planCode: String!
+  status: String!
+  source: String!
+}
+
+type CatalogChange {
+  id: ID!
+  sku: String!
+  name: String!
+  baseUnit: String!
+  status: String!
+  updatedAt: DateTime!
+  archived: Boolean!
+}
+
+type Registration {
+  companyId: ID
+  companyName: String
+  primaryCurrency: String
+  clerkLinked: Boolean!
+  trialEndsAt: DateTime
+  steps: [RegistrationStep!]!
+}
+
+type RegistrationStep {
+  code: String!
+  label: String!
+  done: Boolean!
+}
+
+type CompanyCreated {
+  companyId: ID!
+  storeId: ID
+  role: String!
+  primaryCurrency: String!
+  trialEndsAt: DateTime!
+}
+
+type Invitation {
+  id: ID!
+  email: String!
+  role: String!
+  storeId: ID
+  status: String!
+  expiresAt: DateTime!
+  token: String
+}
+
+type Membership {
+  companyId: ID!
+  role: String!
+  storeId: ID
+}
+
+type Sale {
+  id: ID!
+  storeId: ID!
+  customerId: ID
+  currency: String!
+  netAmount: String!
+  paidAmount: String!
+  dueAmount: String!
+  createdAt: DateTime!
+  lines: [SaleLine!]!
+}
+
+type SaleLine {
+  productId: ID!
+  unitName: String!
+  quantity: String!
+  unitPrice: String!
+  lineNet: String!
+}
+
+type Customer {
+  id: ID!
+  storeId: ID!
+  name: String!
+  phone: String
+  notes: String
+  creditLimit: String
+  createdAt: DateTime!
+}
+
+type Debt {
+  id: ID!
+  storeId: ID!
+  customerId: ID!
+  customerName: String!
+  saleId: ID!
+  currency: String!
+  originalAmount: String!
+  collectedAmount: String!
+  dueAmount: String!
+  dueOn: String
+  status: String!
+  createdAt: DateTime!
+}
+
+type StockItem {
+  productId: ID!
+  sku: String!
+  name: String!
+  baseUnit: String!
+  quantity: String!
+  alertThreshold: String!
+  belowAlert: Boolean!
+  updatedAt: DateTime!
+}
+
+type CashRegister {
+  id: ID!
+  name: String!
+  openSession: OpenCashSession
+}
+
+type OpenCashSession {
+  id: ID!
+  openedAt: DateTime!
+  balances: [MoneyAmount!]
+}
+
+type MoneyAmount {
+  currency: String!
+  amount: String!
+}
+
+type ShopReport {
+  netSales: MoneyAmount!
+  paymentsByMethod: [MethodTotal!]!
+  openDebts: DebtBook!
+  expenses: MoneyAmount!
+  lowStock: [LowStockItem!]!
+  topProducts: [TopProduct!]!
+  grossMargin: GrossMargin
+  cashCounts: [CashCount!]!
+}
+
+type MethodTotal {
+  method: String!
+  currency: String!
+  amount: String!
+}
+
+type DebtBook {
+  currency: String!
+  openAmount: String!
+  overdueAmount: String!
+}
+
+type LowStockItem {
+  storeId: ID!
+  sku: String!
+  name: String!
+  quantity: String!
+}
+
+type TopProduct {
+  sku: String!
+  name: String!
+  quantity: String!
+  netAmount: String!
+  currency: String!
+}
+
+# Marge brute. Ce n'est pas le bénéfice net. Null si l'offre ou le rôle ne l'autorise pas.
+type GrossMargin {
+  currency: String!
+  netSales: String!
+  costOfGoods: String!
+  grossMargin: String!
+  marginIncomplete: Boolean!
+}
+
+type CashCount {
+  currency: String!
+  expectedAmount: String!
+  countedAmount: String!
+  variance: String!
+}
+
+input CreateCompanyInput {
+  name: String!
+  primaryCurrency: String!
+  storeName: String!
+  timezone: String
+}
+
+input InviteMemberInput {
+  email: String!
+  role: String!
+  storeId: ID
+}
+
+input ConfirmSaleInput {
+  idempotencyKey: String!
+  storeId: ID!
+  customerId: ID
+  currency: String!
+  lines: [SaleLineInput!]!
+  payments: [PaymentInput!]!
+}
+
+input SaleLineInput {
+  productId: ID!
+  unitName: String!
+  quantity: String!
+  expectedUnitPrice: String!
+}
+
+input PaymentInput {
+  method: String!
+  amount: String!
+  externalReference: String
+}
+
+type SaleResult {
+  saleId: ID!
+  currency: String!
+  netAmount: String!
+  paidAmount: String!
+  dueAmount: String!
+  debtId: ID
+}
+
+scalar DateTime

@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package easystock.subscription.v1;
+
+option go_package = "rangoapp/internal/easystock/gen/subscriptionv1;subscriptionv1";
+
+service SubscriptionService {
+  rpc GetSubscription(GetSubscriptionRequest) returns (GetSubscriptionResponse);
+  rpc ConfirmLocalPayment(ConfirmLocalPaymentRequest) returns (ConfirmLocalPaymentResponse);
+}
+
+message GetSubscriptionRequest {}
+
+message GetSubscriptionResponse {
+  string plan_code = 1;
+  string status = 2;
+  string source = 3;
+}
+
+message ConfirmLocalPaymentRequest {
+  string payment_id = 1;
+}
+
+message ConfirmLocalPaymentResponse {
+  string status = 1;
+  string source = 2;
+}

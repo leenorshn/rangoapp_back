@@ -35,9 +35,10 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Main binary
-rangoapp
-easystock
+# Root binaries only. A bare name also ignores cmd/easystock and internal/easystock.
+/rangoapp
+/easystock
+/server
 .cache/
 data/
 backups/
