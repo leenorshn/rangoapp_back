@@ -1,60 +1,85 @@
-#!/bin/bash
+#!/bin/sh
+# Prepare an Ubuntu droplet for EasyStock. Run as root from a clone of this repository:
+#   sudo sh scripts/setup-droplet.sh
 
-# Script de configuration automatique d'un Droplet DigitalOcean
-# Usage: ./setup-droplet.sh
+set -eu
 
-set -e
-
-echo "🚀 Configuration du Droplet DigitalOcean pour RangoApp Backend"
-
-# Couleurs pour les messages
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Vérifier que le script est exécuté en root
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}❌ Ce script doit être exécuté en tant que root${NC}"
-    exit 1
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run this script as root." >&2
+  exit 1
 fi
 
-echo -e "${GREEN}✅ Mise à jour du système...${NC}"
-apt update && apt upgrade -y
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
-echo -e "${GREEN}✅ Installation de Docker...${NC}"
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-rm get-docker.sh
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get upgrade -y
+apt-get install -y ca-certificates curl openssl ufw
 
-echo -e "${GREEN}✅ Installation de Docker Compose...${NC}"
-apt install docker-compose -y
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  sh /tmp/get-docker.sh
+  rm -f /tmp/get-docker.sh
+fi
+systemctl enable --now docker
+docker compose version
 
-echo -e "${GREEN}✅ Installation de Nginx...${NC}"
-apt install nginx -y
+if [ ! -f /swapfile ]; then
+  fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
 
-echo -e "${GREEN}✅ Installation de Certbot (pour SSL)...${NC}"
-apt install certbot python3-certbot-nginx -y
-
-echo -e "${GREEN}✅ Configuration du firewall...${NC}"
-ufw allow 22/tcp
+ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
-ufw allow 8080/tcp
 ufw --force enable
 
-echo -e "${GREEN}✅ Création du dossier de l'application...${NC}"
-mkdir -p /opt/rangoapp
-cd /opt/rangoapp
+if [ ! -f "$ROOT/.env" ]; then
+  umask 077
+  pg="$(openssl rand -hex 24)"
+  app="$(openssl rand -hex 24)"
+  identity="$(openssl rand -hex 24)"
+  job="$(openssl rand -hex 24)"
+  secret="$(openssl rand -hex 32)"
+  cat > "$ROOT/.env" <<EOF
+POSTGRES_PASSWORD=$pg
+APP_DB_PASSWORD=$app
+IDENTITY_DB_PASSWORD=$identity
+JOB_DB_PASSWORD=$job
+INTERNAL_CONTEXT_SECRET=$secret
+CLERK_WEBHOOK_SECRET=
+CLERK_JWKS_URL=
+CLERK_ISSUER=
+CLERK_AUTHORIZED_PARTIES=
+S3_ENDPOINT=
+S3_REGION=nyc3
+S3_BUCKET=
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
+S3_USE_PATH_STYLE=false
+SITE_ADDRESS=:80
+EASYSTOCK_IMAGE=easystock:local
+EASYSTOCK_PULL_POLICY=missing
+EOF
+  chmod 600 "$ROOT/.env"
+  echo "Wrote $ROOT/.env with generated database passwords."
+else
+  echo "Kept existing $ROOT/.env"
+fi
 
-echo -e "${YELLOW}⚠️  Créez maintenant le fichier .env avec vos variables d'environnement${NC}"
-echo -e "${YELLOW}   nano /opt/rangoapp/.env${NC}"
+cat > /etc/cron.d/easystock <<EOF
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+0 3 * * * root $ROOT/scripts/backup-droplet.sh >> /var/log/easystock-backup.log 2>&1
+EOF
+chmod 644 /etc/cron.d/easystock
 
-echo -e "${GREEN}✅ Configuration terminée!${NC}"
-echo ""
-echo "Prochaines étapes:"
-echo "1. Créez le fichier .env: nano /opt/rangoapp/.env"
-echo "2. Ajoutez vos variables d'environnement (DATABASE_URL, CLERK_JWKS_URL, INTERNAL_CONTEXT_SECRET, etc.)"
-echo "3. Configurez Nginx pour votre domaine"
-echo "4. Configurez SSL avec: certbot --nginx -d votre-domaine.com"
-echo "5. Le déploiement se fera automatiquement via GitHub Actions"
+echo
+echo "Next:"
+echo "1. Edit $ROOT/.env (Clerk, Spaces, SITE_ADDRESS)."
+echo "2. sudo sh $ROOT/scripts/deploy.sh"
+echo "3. Check http://<droplet-ip>/health"

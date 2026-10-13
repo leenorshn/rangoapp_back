@@ -7,14 +7,35 @@ on:
       - master
   workflow_dispatch:
 
-env:
-  DOCKER_REGISTRY: registry.digitalocean.com
-  APP_NAME: rangoapp-backend
+concurrency:
+  group: digitalocean-droplet
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-deploy:
+  test:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Run tests
+        run: go test ./internal/easystock/... -count=1
+
+  deploy:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || vars.DIGITALOCEAN_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,45 +46,61 @@ jobs:
       - name: Log in to DigitalOcean Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.DOCKER_REGISTRY }}
+          registry: registry.digitalocean.com
           username: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
           password: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push image
+        uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.digitalocean
+          platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/${{ env.APP_NAME }}:latest
-            ${{ env.DOCKER_REGISTRY }}/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/${{ env.APP_NAME }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.DOCKER_REGISTRY }}/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/${{ env.APP_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.DOCKER_REGISTRY }}/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/${{ env.APP_NAME }}:buildcache,mode=max
+            registry.digitalocean.com/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/easystock:${{ github.sha }}
+            registry.digitalocean.com/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/easystock:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Deploy to Droplet via SSH
-        uses: appleboy/ssh-action@v1.0.0
+      - name: Copy deploy files
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
+          source: "docker-compose.digitalocean.yml,deploy/Caddyfile,scripts/deploy.sh,scripts/backup-droplet.sh,scripts/setup-droplet.sh,env.digitalocean.example"
+          target: "/opt/easystock"
+          overwrite: true
+
+      - name: Deploy on the droplet
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          IMAGE: registry.digitalocean.com/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/easystock:${{ github.sha }}
+          DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          command_timeout: 20m
+          envs: IMAGE,DIGITALOCEAN_ACCESS_TOKEN
           script: |
-            # Login to DigitalOcean Container Registry
-            echo ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} | docker login ${{ env.DOCKER_REGISTRY }} -u ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} --password-stdin
-            
-            # Pull latest image
-            docker pull ${{ env.DOCKER_REGISTRY }}/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/${{ env.APP_NAME }}:latest
-            
-            # Stop and remove old container
-            docker stop ${{ env.APP_NAME }} || true
-            docker rm ${{ env.APP_NAME }} || true
-            
-            # Run new container
-            docker run -d \
-              --name ${{ env.APP_NAME }} \
-              --restart unless-stopped \
-              -p 8080:8080 \
-              --env-file /opt/rangoapp/.env \
-              ${{ env.DOCKER_REGISTRY }}/${{ secrets.DIGITALOCEAN_REGISTRY_NAME }}/${{ env.APP_NAME }}:latest
-            
-            # Clean up old images
-            docker image prune -af --filter "until=24h"
+            set -eu
+            cd /opt/easystock
+            if [ ! -f .env ]; then
+              echo "Missing /opt/easystock/.env. Run scripts/setup-droplet.sh on the droplet first."
+              exit 1
+            fi
+            if grep -q '^EASYSTOCK_IMAGE=' .env; then
+              sed -i "s#^EASYSTOCK_IMAGE=.*#EASYSTOCK_IMAGE=${IMAGE}#" .env
+            else
+              echo "EASYSTOCK_IMAGE=${IMAGE}" >> .env
+            fi
+            if grep -q '^EASYSTOCK_PULL_POLICY=' .env; then
+              sed -i 's#^EASYSTOCK_PULL_POLICY=.*#EASYSTOCK_PULL_POLICY=always#' .env
+            else
+              echo 'EASYSTOCK_PULL_POLICY=always' >> .env
+            fi
+            sh scripts/deploy.sh

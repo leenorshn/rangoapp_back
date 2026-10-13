@@ -18,6 +18,10 @@ Le binaire a quatre commandes :
 
 `docker compose up` démarre Postgres, les migrations, les rôles et les deux processus.
 
+## Déploiement
+
+Le déploiement DigitalOcean est décrit dans [DIGITALOCEAN_DEPLOYMENT.md](DIGITALOCEAN_DEPLOYMENT.md). Sur un droplet : `sudo sh scripts/setup-droplet.sh`, puis `sudo sh scripts/deploy.sh`.
+
 ## Tests
 
 ```bash

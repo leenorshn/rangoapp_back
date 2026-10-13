@@ -1,30 +1,148 @@
-version: '3.8'
+# EasyStock on a DigitalOcean droplet.
+# Postgres, gRPC and the API stay on the private network. Caddy publishes 80 and 443.
+# Run scripts/deploy.sh. Do not publish 5432 or 7443.
+
+name: easystock-do
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app: &app
+  image: ${EASYSTOCK_IMAGE:-easystock:local}
+  platform: linux/amd64
+  pull_policy: missing
+  build:
+    context: .
+    dockerfile: Dockerfile.digitalocean
+  logging: *logging
 
 services:
-  rangoapp-backend:
-    image: registry.digitalocean.com/YOUR_REGISTRY_NAME/rangoapp-backend:latest
-    container_name: rangoapp-backend
+  postgres:
+    image: postgres:16-alpine
+    platform: linux/amd64
     restart: unless-stopped
-    ports:
-      - "8080:8080"
-    env_file:
-      - .env
     environment:
-      - PORT=8080
+      POSTGRES_USER: easystock_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: easystock
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=40
+      - -c
+      - work_mem=4MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+      test: ["CMD-SHELL", "pg_isready -U easystock_migrator -d easystock"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
       start_period: 10s
-    networks:
-      - rangoapp-network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    networks: [private]
+    logging: *logging
+    stop_grace_period: 20s
+
+  migrate:
+    <<: *app
+    profiles: ["migrate"]
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://easystock_migrator:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/easystock?sslmode=disable
+      SET_ROLE_PASSWORDS: "true"
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD is required}
+      JOB_DB_PASSWORD: ${JOB_DB_PASSWORD:?JOB_DB_PASSWORD is required}
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    restart: "no"
+
+  grpc:
+    <<: *app
+    command: ["grpc"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_APP: postgres://easystock_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}@postgres:5432/easystock?sslmode=disable
+      INTERNAL_CONTEXT_SECRET: ${INTERNAL_CONTEXT_SECRET:?INTERNAL_CONTEXT_SECRET is required}
+      GRPC_LISTEN: 0.0.0.0:7443
+      # Port 7443 is not published. The flag is required because the listener is not loopback.
+      GRPC_INSECURE_DEV: "true"
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
+    stop_grace_period: 25s
+
+  api:
+    <<: *app
+    command: ["api"]
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATABASE_URL_IDENTITY: postgres://easystock_identity:${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD is required}@postgres:5432/easystock?sslmode=disable
+      DATABASE_URL_APP: postgres://easystock_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}@postgres:5432/easystock?sslmode=disable
+      COMMERCE_GRPC_ADDR: grpc:7443
+      INTERNAL_CONTEXT_SECRET: ${INTERNAL_CONTEXT_SECRET:?INTERNAL_CONTEXT_SECRET is required}
+      GRPC_INSECURE_DEV: "true"
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-nyc3}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_USE_PATH_STYLE: ${S3_USE_PATH_STYLE:-false}
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+      grpc:
+        condition: service_started
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    stop_grace_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [private]
+    logging: *logging
 
 networks:
-  rangoapp-network:
-    driver: bridge
+  private:
+
+volumes:
+  pgdata:
+    name: easystock_do_pgdata
+  caddy_data:
+  caddy_config:

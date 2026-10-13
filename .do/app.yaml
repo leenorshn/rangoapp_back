@@ -1,16 +1,50 @@
-name: rangoapp-backend
+# EasyStock on App Platform. Import this spec, then fill the SECRET values.
+# gRPC listens only on the private network. The public route is the API.
+name: easystock
 region: nyc
+
+databases:
+  - name: easystock-db
+    engine: PG
+    version: "16"
+    production: false
+
 services:
-  - name: api
+  - name: grpc
     github:
-      repo: YOUR_USERNAME/rangoapp_back
+      repo: leenorshn/rangoapp_back
       branch: main
       deploy_on_push: true
     dockerfile_path: Dockerfile.digitalocean
     source_dir: /
+    run_command: grpc
+    internal_ports:
+      - 7443
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      - key: DATABASE_URL_APP
+        scope: RUN_TIME
+        type: SECRET
+      - key: INTERNAL_CONTEXT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: GRPC_LISTEN
+        value: "0.0.0.0:7443"
+      - key: GRPC_INSECURE_DEV
+        value: "true"
+
+  - name: api
+    github:
+      repo: leenorshn/rangoapp_back
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile.digitalocean
+    source_dir: /
+    run_command: api
     http_port: 8080
     instance_count: 1
-    instance_size_slug: basic-xxs  # $5/month - parfait pour <20 utilisateurs
+    instance_size_slug: apps-s-1vcpu-0.5gb
     health_check:
       http_path: /health
       initial_delay_seconds: 10
@@ -21,18 +55,19 @@ services:
     envs:
       - key: PORT
         value: "8080"
-      - key: DATABASE_URL
+      - key: DATABASE_URL_IDENTITY
         scope: RUN_TIME
         type: SECRET
       - key: DATABASE_URL_APP
         scope: RUN_TIME
         type: SECRET
-      - key: DATABASE_URL_IDENTITY
-        scope: RUN_TIME
-        type: SECRET
       - key: INTERNAL_CONTEXT_SECRET
         scope: RUN_TIME
         type: SECRET
+      - key: COMMERCE_GRPC_ADDR
+        value: grpc:7443
+      - key: GRPC_INSECURE_DEV
+        value: "true"
       - key: CLERK_WEBHOOK_SECRET
         scope: RUN_TIME
         type: SECRET
@@ -45,9 +80,22 @@ services:
       - key: CLERK_AUTHORIZED_PARTIES
         scope: RUN_TIME
         type: SECRET
-      - key: COMMERCE_GRPC_ADDR
+      - key: S3_ENDPOINT
         scope: RUN_TIME
         type: SECRET
+      - key: S3_REGION
+        value: nyc3
+      - key: S3_BUCKET
+        scope: RUN_TIME
+        type: SECRET
+      - key: S3_ACCESS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: S3_SECRET_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: S3_USE_PATH_STYLE
+        value: "false"
     routes:
       - path: /
     cors:
@@ -60,6 +108,33 @@ services:
       allow_headers:
         - Content-Type
         - Authorization
+        - X-Request-Id
       expose_headers:
         - Content-Length
       max_age: 86400
+
+jobs:
+  - name: migrate
+    kind: PRE_DEPLOY
+    github:
+      repo: leenorshn/rangoapp_back
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile.digitalocean
+    source_dir: /
+    run_command: migrate
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      - key: DATABASE_URL
+        value: ${easystock-db.DATABASE_URL}
+      - key: SET_ROLE_PASSWORDS
+        value: "true"
+      - key: APP_DB_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: IDENTITY_DB_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: JOB_DB_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
