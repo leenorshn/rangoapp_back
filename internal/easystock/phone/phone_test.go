@@ -23,4 +23,18 @@ func TestNormalizeDRC(t *testing.T) {
 	if _, err := Normalize("0970000001", ""); err == nil {
 		t.Fatal("missing region was accepted")
 	}
+	seed, err := Normalize("+243978154329", "CD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seed != "+243978154329" {
+		t.Fatalf("seed phone %s", seed)
+	}
+	local, err := Normalize("0978154329", "CD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local != seed {
+		t.Fatalf("local seed %s", local)
+	}
 }

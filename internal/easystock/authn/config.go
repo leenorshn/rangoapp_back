@@ -4,25 +4,27 @@ import "time"
 
 // Config holds the authentication limits. Zero durations are replaced by DefaultConfig.
 type Config struct {
-	JWTSecret     string
-	OTPSecret     string
-	Issuer        string
-	Audience      string
-	Region        string
-	AccessTTL     time.Duration
-	IdleTTL       time.Duration
-	AbsoluteTTL   time.Duration
-	OTPTTL        time.Duration
+	JWTSecret      string
+	OTPSecret      string
+	Issuer         string
+	Audience       string
+	Region         string
+	AccessTTL      time.Duration
+	IdleTTL        time.Duration
+	AbsoluteTTL    time.Duration
+	OTPTTL         time.Duration
 	OTPMaxAttempts int
-	OTPResend     time.Duration
-	GrantTTL      time.Duration
-	BcryptCost    int
-	OTPPerPhone   int
-	OTPPerIP      int
-	OTPWindow     time.Duration
-	LoginAttempts int
-	LoginWindow   time.Duration
-	Now           func() time.Time
+	OTPResend      time.Duration
+	GrantTTL       time.Duration
+	BcryptCost     int
+	OTPPerPhone    int
+	OTPPerIP       int
+	OTPWindow      time.Duration
+	LoginAttempts  int
+	LoginWindow    time.Duration
+	// SeededOTP maps an E.164 number to a fixed code used to test OTP.
+	SeededOTP map[string]string
+	Now       func() time.Time
 }
 
 func DefaultConfig() Config {
@@ -97,6 +99,28 @@ func (c Config) withDefaults() Config {
 	}
 	base.JWTSecret = c.JWTSecret
 	base.OTPSecret = c.OTPSecret
+	base.SeededOTP = c.SeededOTP
 	base.Now = c.Now
 	return base
+}
+
+// DevelopmentOTPSeed is the phone and code used to exercise OTP without reading the SMS.
+// The API loads it in every environment, including the cloud deployment.
+func DevelopmentOTPSeed() map[string]string {
+	return map[string]string{
+		"+243978154329": "123123",
+	}
+}
+
+func (c Config) seededCode(number string) (string, bool) {
+	code, ok := c.SeededOTP[number]
+	if !ok || len(code) != 6 {
+		return "", false
+	}
+	for _, r := range code {
+		if r < '0' || r > '9' {
+			return "", false
+		}
+	}
+	return code, true
 }

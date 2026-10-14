@@ -251,6 +251,7 @@ func loadAuthConfig() (authn.Config, error) {
 	if len(cfg.JWTSecret) < 32 || len(cfg.OTPSecret) < 32 {
 		return cfg, errors.New("AUTH_JWT_SECRET and AUTH_OTP_SECRET must be at least 32 characters")
 	}
+	cfg.SeededOTP = authn.DevelopmentOTPSeed()
 	return cfg, nil
 }
 

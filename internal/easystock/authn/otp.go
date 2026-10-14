@@ -64,7 +64,7 @@ func (s *Service) RequestOTP(ctx context.Context, purpose, rawPhone string, req 
 	`, number, purpose, now); err != nil {
 		return err
 	}
-	code, err := numericCode()
+	code, err := s.issueCode(number)
 	if err != nil {
 		return domain.Internal("La demande n'a pas pu être enregistrée.")
 	}
@@ -87,6 +87,9 @@ func (s *Service) RequestOTP(ctx context.Context, purpose, rawPhone string, req 
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
+	if _, seeded := s.cfg.seededCode(number); seeded {
+		return nil
+	}
 	if s.sms == nil {
 		_ = s.consumeChallenge(ctx, challengeID, now)
 		return domain.Internal("L'envoi du code est indisponible.")
@@ -97,6 +100,13 @@ func (s *Service) RequestOTP(ctx context.Context, purpose, rawPhone string, req 
 		return domain.Internal("Le code n'a pas pu être envoyé.")
 	}
 	return nil
+}
+
+func (s *Service) issueCode(number string) (string, error) {
+	if code, ok := s.cfg.seededCode(number); ok {
+		return code, nil
+	}
+	return numericCode()
 }
 
 func (s *Service) consumeChallenge(ctx context.Context, id string, now time.Time) error {

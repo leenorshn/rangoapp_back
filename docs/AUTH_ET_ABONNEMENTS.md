@@ -211,6 +211,8 @@ Après déploiement, un propriétaire dont le numéro est unique et déjà en E.
 
 `SMS_PROVIDER=dev` journalise « SMS simulé, non envoyé » et n'émet rien. Ce n'est pas un SMS délivré. Le même avertissement vaut pour le push. Aucune passerelle réelle n'est branchée dans ce dépôt : l'adaptateur HTTP est le point de raccordement.
 
+Le numéro `+243978154329` (ou `0978154329`) accepte toujours le code `123123` après une demande d'OTP, y compris sur le déploiement cloud. Aucun SMS n'est envoyé pour ce numéro. L'expiration, le délai de renvoi et le nombre d'essais restent en vigueur. Les autres numéros reçoivent un code aléatoire.
+
 Le justificatif de paiement réutilise le stockage S3 déjà configuré (`S3_*`). Sans stockage, une déclaration avec `proofKey` est refusée. Une déclaration sans justificatif reste possible.
 
 Pour nommer un administrateur plateforme, après qu'il a un compte :
