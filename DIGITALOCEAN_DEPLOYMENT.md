@@ -1,11 +1,11 @@
 # Déploiement DigitalOcean
 
-EasyStock publie l’API HTTP (`GET /health`, `POST /graphql`, `POST /webhooks/clerk`). Le processus gRPC et PostgreSQL restent sur le réseau privé. Le port 7443 n’est pas exposé.
+EasyStock publie l’API HTTP (`GET /health`, `POST /graphql`). Le processus gRPC, le worker de rappels et PostgreSQL restent sur le réseau privé. Le port 7443 n’est pas exposé.
 
 Deux chemins sont prêts :
 
 - **Droplet** — un serveur, Docker Compose, Caddy. C’est le chemin à utiliser.
-- **App Platform** — spécification `.do/app.yaml`, base managée, deux instances (API et gRPC).
+- **App Platform** — spécification `.do/app.yaml`, base managée, API, gRPC et worker de rappels.
 
 ## Droplet
 
@@ -27,7 +27,10 @@ Le script installe Docker, ouvre les ports 22, 80 et 443, ajoute 1 Go de swap, g
 
 Fichier modèle : `env.digitalocean.example`.
 
-- `CLERK_JWKS_URL`, `CLERK_ISSUER`, `CLERK_AUTHORIZED_PARTIES`, `CLERK_WEBHOOK_SECRET`
+- `AUTH_JWT_SECRET` et `AUTH_OTP_SECRET` (au moins 32 caractères, générés par `setup-droplet.sh`)
+- `SMS_PROVIDER=http`, `SMS_HTTP_URL`, `SMS_HTTP_TOKEN`, `PUSH_PROVIDER=http`, `PUSH_HTTP_URL`, `PUSH_HTTP_TOKEN`
+- `AUTH_CORS_ORIGINS`, liste explicite des origines du client web
+- `PHONE_DEFAULT_REGION=CD`
 - Spaces, si les photos et reçus sont utilisés : `S3_ENDPOINT` (`https://<région>.digitaloceanspaces.com`), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_USE_PATH_STYLE=false`
 - `SITE_ADDRESS=:80` pour HTTP sur l’adresse IP du droplet. Avec un nom de domaine (`api.example.com`), Caddy obtient le certificat. Le DNS doit pointer vers le droplet avant le redéploiement.
 
@@ -41,7 +44,7 @@ Les mots de passe sont placés dans les URL PostgreSQL : hexadécimal, sans espa
 sudo sh /opt/easystock/scripts/deploy.sh
 ```
 
-Le script construit `Dockerfile.digitalocean`, applique les migrations, pose les mots de passe des rôles `easystock_app`, `easystock_identity` et `easystock_job`, puis démarre Postgres, gRPC, l’API et Caddy.
+Le script construit `Dockerfile.digitalocean`, applique les migrations, pose les mots de passe des rôles `easystock_app`, `easystock_identity` et `easystock_job`, puis démarre Postgres, Redis, gRPC, l’API, le worker et Caddy.
 
 Vérification :
 
@@ -54,10 +57,9 @@ Réponse attendue : `ok`. Avec un domaine : `curl -fsS https://api.example.com/h
 URL publiques :
 
 - `POST /graphql`
-- `POST /webhooks/clerk`
 - `GET /health`
 
-Webhook Clerk : `https://<domaine>/webhooks/clerk`.
+`APP_ENV=production` refuse `SMS_PROVIDER=dev` et `PUSH_PROVIDER=dev`. Sans passerelle HTTP configurée, l’API et le worker ne démarrent pas.
 
 ### 5. GitHub Actions
 
@@ -108,7 +110,7 @@ postgres://easystock_app:<APP_DB_PASSWORD>@<hôte>:25060/defaultdb?sslmode=requi
 postgres://easystock_identity:<IDENTITY_DB_PASSWORD>@<hôte>:25060/defaultdb?sslmode=require
 ```
 
-`DATABASE_URL_APP` (service gRPC et service API) utilise `easystock_app`. `DATABASE_URL_IDENTITY` utilise `easystock_identity`. `COMMERCE_GRPC_ADDR` est `grpc:7443`. Le port gRPC est interne à l’application. `GRPC_INSECURE_DEV=true` est posé par la spec parce que l’écoute n’est pas en loopback ; le port n’a pas de route publique.
+`DATABASE_URL_APP` (service gRPC et service API) utilise `easystock_app`. `DATABASE_URL_IDENTITY` utilise `easystock_identity`. `DATABASE_URL_JOB` (worker) utilise `easystock_job`. `COMMERCE_GRPC_ADDR` est `grpc:7443`. Le port gRPC est interne à l’application. `GRPC_INSECURE_DEV=true` est posé par la spec parce que l’écoute n’est pas en loopback ; le port n’a pas de route publique.
 
 `INTERNAL_CONTEXT_SECRET` fait au moins 32 caractères, identique pour l’API et gRPC.
 
@@ -120,7 +122,8 @@ Le workflow **Deploy to DigitalOcean App Platform** est manuel. Secret suppléme
 
 - [ ] `GET /health` répond `ok` (le processus API écoute ; cette route ne vérifie pas PostgreSQL)
 - [ ] Les ports 5432 et 7443 ne répondent pas depuis l’extérieur
-- [ ] Clerk : émetteur, JWKS, parties autorisées, secret webhook
+- [ ] `AUTH_JWT_SECRET`, `AUTH_OTP_SECRET`, `SMS_PROVIDER=http` et `PUSH_PROVIDER=http` sont renseignés
+- [ ] Le worker journalise `easystock worker ticking every 5 minutes`
 - [ ] Le bucket Spaces existe dans la même région que `S3_REGION`
 - [ ] `docker compose ... logs grpc` affiche `easystock grpc listening`
 - [ ] Une sauvegarde a été écrite dans `/opt/easystock/backups`

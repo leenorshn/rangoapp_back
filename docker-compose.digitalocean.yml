@@ -94,10 +94,19 @@ services:
       COMMERCE_GRPC_ADDR: grpc:7443
       INTERNAL_CONTEXT_SECRET: ${INTERNAL_CONTEXT_SECRET:?INTERNAL_CONTEXT_SECRET is required}
       GRPC_INSECURE_DEV: "true"
-      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
-      CLERK_ISSUER: ${CLERK_ISSUER:-}
-      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
+      APP_ENV: ${APP_ENV:-production}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required}
+      AUTH_OTP_SECRET: ${AUTH_OTP_SECRET:?AUTH_OTP_SECRET is required}
+      PHONE_DEFAULT_REGION: ${PHONE_DEFAULT_REGION:-CD}
+      SMS_PROVIDER: ${SMS_PROVIDER:?SMS_PROVIDER is required}
+      SMS_HTTP_URL: ${SMS_HTTP_URL:-}
+      SMS_HTTP_TOKEN: ${SMS_HTTP_TOKEN:-}
+      PUSH_PROVIDER: ${PUSH_PROVIDER:?PUSH_PROVIDER is required}
+      PUSH_HTTP_URL: ${PUSH_HTTP_URL:-}
+      PUSH_HTTP_TOKEN: ${PUSH_HTTP_TOKEN:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      AUTH_CORS_ORIGINS: ${AUTH_CORS_ORIGINS:-}
+      AUTH_COOKIE_SECURE: "true"
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-nyc3}
       S3_BUCKET: ${S3_BUCKET:-}
@@ -117,6 +126,34 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
+    stop_grace_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/amd64
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [private]
+    logging: *logging
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_JOB: postgres://easystock_job:${JOB_DB_PASSWORD:?JOB_DB_PASSWORD is required}@postgres:5432/easystock?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SMS_PROVIDER: ${SMS_PROVIDER:?SMS_PROVIDER is required}
+      SMS_HTTP_URL: ${SMS_HTTP_URL:-}
+      SMS_HTTP_TOKEN: ${SMS_HTTP_TOKEN:-}
+      PUSH_PROVIDER: ${PUSH_PROVIDER:?PUSH_PROVIDER is required}
+      PUSH_HTTP_URL: ${PUSH_HTTP_URL:-}
+      PUSH_HTTP_TOKEN: ${PUSH_HTTP_TOKEN:-}
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [private]
     stop_grace_period: 20s
 
   caddy:

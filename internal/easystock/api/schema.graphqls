@@ -13,6 +13,14 @@ type Query {
   stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
   cash(storeId: ID!): [CashRegister!]!
   reports(storeId: ID, currency: String!, from: DateTime!, to: DateTime!): ShopReport!
+  me: Me!
+  mySessions: [DeviceSession!]!
+  employees: [Employee!]!
+  myOrganizationSubscription: OrganizationSubscription!
+  renewalInstructions: OrganizationSubscription!
+  mySubscriptionPaymentRequests: [SubscriptionPayment!]!
+  pendingSubscriptionPayments: [SubscriptionPayment!]!
+  myNotifications: [AppNotification!]!
 }
 
 type Mutation {
@@ -21,6 +29,31 @@ type Mutation {
   inviteMember(input: InviteMemberInput!): Invitation!
   revokeInvitation(id: ID!): Boolean!
   acceptInvitation(token: String!): Membership!
+  requestOwnerSignupOtp(phone: String!): Boolean!
+  verifyOwnerSignupOtp(phone: String!, code: String!): String!
+  completeOwnerSignup(input: CompleteOwnerSignupInput!): AuthSession!
+  login(input: LoginInput!): AuthSession!
+  refreshSession(refreshToken: String): AuthSession!
+  logout: Boolean!
+  logoutAllSessions: Boolean!
+  revokeSession(id: ID!): Boolean!
+  changePassword(currentPassword: String!, newPassword: String!): AuthSession!
+  requestPasswordResetOtp(phone: String!): Boolean!
+  verifyPasswordResetOtp(phone: String!, code: String!): String!
+  resetPassword(input: ResetPasswordInput!): AuthSession!
+  createEmployee(input: CreateEmployeeInput!): Employee!
+  updateEmployeeRole(userId: ID!, role: String!): Boolean!
+  deactivateEmployee(userId: ID!): Boolean!
+  reactivateEmployee(userId: ID!): Boolean!
+  submitSubscriptionPayment(input: SubmitSubscriptionPaymentInput!): ID!
+  approveSubscriptionPayment(id: ID!, receivedAmount: String!): DateTime!
+  rejectSubscriptionPayment(id: ID!, reason: String!): Boolean!
+  updateReminderPreferences(smsRemindersEnabled: Boolean!): Boolean!
+  upsertPaymentInstructions(input: PaymentInstructionsInput!): Boolean!
+  updateSubscriptionPlan(code: String!, monthlyPrice: String!, durationMonths: Int!): Boolean!
+  registerPushDevice(token: String!, platform: String!): Boolean!
+  unregisterPushDevice(token: String!): Boolean!
+  markNotificationRead(id: ID!): Boolean!
 }
 
 type Subscription {
@@ -250,3 +283,148 @@ type SaleResult {
 }
 
 scalar DateTime
+
+type AuthSession {
+  accessToken: String!
+  refreshToken: String
+  expiresAt: DateTime!
+  sessionId: ID!
+  userId: ID!
+  companyId: ID
+  role: String
+  scope: String!
+  mustChangePassword: Boolean!
+  csrfToken: String
+}
+
+type Me {
+  id: ID!
+  fullName: String!
+  phone: String
+  phoneVerified: Boolean!
+  email: String
+  mustChangePassword: Boolean!
+  companies: [MyCompany!]!
+}
+
+type MyCompany {
+  companyId: ID!
+  companyName: String!
+  role: String!
+  status: String!
+}
+
+type DeviceSession {
+  id: ID!
+  companyId: ID
+  scope: String!
+  createdAt: DateTime!
+  lastRefreshAt: DateTime!
+  expiresAt: DateTime!
+  current: Boolean!
+  userAgent: String
+}
+
+type Employee {
+  userId: ID!
+  fullName: String!
+  phone: String
+  role: String!
+  status: String!
+  mustChangePassword: Boolean!
+  phoneVerified: Boolean!
+}
+
+type OrganizationSubscription {
+  companyId: ID!
+  companyName: String!
+  role: String!
+  lifecycle: String!
+  status: String!
+  planCode: String!
+  planName: String!
+  amount: String
+  currency: String
+  durationMonths: Int
+  expiresAt: DateTime
+  timezone: String!
+  message: String
+  banner: String
+  canDeclarePayment: Boolean!
+  renewalReference: String
+  operatorName: String
+  destinationAccount: String
+  beneficiaryName: String
+  paymentInstructions: String
+  paymentStatus: String
+  paymentReason: String
+  newExpiresAt: DateTime
+}
+
+type SubscriptionPayment {
+  id: ID!
+  status: String!
+  expectedAmount: String!
+  declaredAmount: String!
+  currency: String!
+  externalReference: String!
+  decisionReason: String
+  createdAt: DateTime!
+  newExpiresAt: DateTime
+}
+
+type AppNotification {
+  id: ID!
+  kind: String!
+  body: String
+  createdAt: DateTime!
+  readAt: DateTime
+}
+
+input CompleteOwnerSignupInput {
+  grant: String!
+  phone: String!
+  fullName: String!
+  password: String!
+  email: String
+  companyName: String!
+  primaryCurrency: String!
+  timezone: String
+  client: String
+}
+
+input LoginInput {
+  phone: String!
+  password: String!
+  companyId: ID
+  client: String
+}
+
+input ResetPasswordInput {
+  grant: String!
+  phone: String!
+  password: String!
+  client: String
+}
+
+input CreateEmployeeInput {
+  fullName: String!
+  phone: String!
+  role: String!
+  password: String!
+  storeId: ID
+}
+
+input SubmitSubscriptionPaymentInput {
+  externalReference: String!
+  declaredAmount: String!
+  proofKey: String
+}
+
+input PaymentInstructionsInput {
+  operatorName: String!
+  destinationAccount: String!
+  beneficiaryName: String!
+  currency: String!
+  instructions: String!
+}

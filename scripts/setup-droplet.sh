@@ -45,16 +45,27 @@ if [ ! -f "$ROOT/.env" ]; then
   identity="$(openssl rand -hex 24)"
   job="$(openssl rand -hex 24)"
   secret="$(openssl rand -hex 32)"
+  jwt="$(openssl rand -hex 32)"
+  otp="$(openssl rand -hex 32)"
   cat > "$ROOT/.env" <<EOF
 POSTGRES_PASSWORD=$pg
 APP_DB_PASSWORD=$app
 IDENTITY_DB_PASSWORD=$identity
 JOB_DB_PASSWORD=$job
 INTERNAL_CONTEXT_SECRET=$secret
-CLERK_WEBHOOK_SECRET=
-CLERK_JWKS_URL=
-CLERK_ISSUER=
-CLERK_AUTHORIZED_PARTIES=
+APP_ENV=production
+AUTH_JWT_SECRET=$jwt
+AUTH_OTP_SECRET=$otp
+PHONE_DEFAULT_REGION=CD
+SMS_PROVIDER=
+SMS_HTTP_URL=
+SMS_HTTP_TOKEN=
+PUSH_PROVIDER=
+PUSH_HTTP_URL=
+PUSH_HTTP_TOKEN=
+REDIS_URL=redis://redis:6379/0
+AUTH_CORS_ORIGINS=
+AUTH_COOKIE_SECURE=true
 S3_ENDPOINT=
 S3_REGION=nyc3
 S3_BUCKET=
@@ -66,7 +77,8 @@ EASYSTOCK_IMAGE=easystock:local
 EASYSTOCK_PULL_POLICY=missing
 EOF
   chmod 600 "$ROOT/.env"
-  echo "Wrote $ROOT/.env with generated database passwords."
+  echo "Wrote $ROOT/.env with generated database and auth secrets."
+  echo "Set SMS_PROVIDER=http, PUSH_PROVIDER=http and their URLs before starting. Production refuses the simulated providers."
 else
   echo "Kept existing $ROOT/.env"
 fi
@@ -80,6 +92,6 @@ chmod 644 /etc/cron.d/easystock
 
 echo
 echo "Next:"
-echo "1. Edit $ROOT/.env (Clerk, Spaces, SITE_ADDRESS)."
+echo "1. Edit $ROOT/.env (SMS, push, Spaces, AUTH_CORS_ORIGINS, SITE_ADDRESS)."
 echo "2. sudo sh $ROOT/scripts/deploy.sh"
 echo "3. Check http://<droplet-ip>/health"

@@ -4,7 +4,9 @@ Le contrat client est `POST /graphql` sur le binaire `cmd/easystock`, décrit da
 
 ## Authentification
 
-`login` et `register` (téléphone + mot de passe) ne sont pas repris. L’application envoie un jeton de session Clerk (`Authorization: Bearer`), avec l’organisation active. Le serveur vérifie la signature JWKS, l’émetteur, l’expiration et la partie autorisée, puis charge le membre dans PostgreSQL. Un e-mail non vérifié ne fusionne pas deux comptes. Le jeton HMAC interne n’est pas accepté sur cette route.
+Les jetons Clerk ne sont plus acceptés. Le parcours, les cookies, les codes d’erreur et l’écran d’expiration sont décrits dans `docs/AUTH_ET_ABONNEMENTS.md`.
+
+Le mobile envoie `client: "mobile"` à `login`, `completeOwnerSignup`, `refreshSession` et `resetPassword`, puis conserve `refreshToken` dans le stockage sécurisé du système. Le jeton d’accès va dans `Authorization: Bearer`. Il dure 15 minutes et ne contient pas le rôle. `refreshSession` doit être sérialisé : un ancien refresh token révoque toute la famille. Un `scope` égal à `password_change` n’autorise que `changePassword`, `logout` et `logoutAllSessions`.
 
 ## Vente
 
@@ -25,13 +27,11 @@ Champs exposés aujourd’hui : `saleId`, `currency`, `netAmount`, `paidAmount`,
 
 ## Inscription
 
-Une session Clerk sans organisation peut appeler `registration` et `createCompany`. `createCompany` enregistre l'entreprise, le propriétaire, un essai de 14 jours et la première boutique avec sa caisse. Tant que l'entreprise n'est pas liée à Clerk, un second appel du même utilisateur renvoie la même entreprise. La devise et le nom peuvent encore changer tant qu'aucune boutique n'existe.
+Le propriétaire passe par `requestOwnerSignupOtp`, `verifyOwnerSignupOtp`, puis `completeOwnerSignup`. Cela crée l'utilisateur, l'entreprise, le rôle `owner` et l'essai déjà configuré sur l'offre Essentiel. `createCompany` ouvre ensuite la première boutique et sa caisse. L'entreprise de la session vient du serveur. Un `organization_id` envoyé par le client n'est pas une autorisation.
 
-Tant que `registration.clerkLinked` est faux, les requêtes suivantes envoient `X-EasyStock-Company` avec l'identifiant renvoyé. Ce header est refusé pour une entreprise déjà liée, ou pour une entreprise dont l'utilisateur n'est pas membre. Dès que le jeton contient l'organisation Clerk, c'est elle qui sélectionne l'entreprise.
+Les employés ne reçoivent pas d'invitation. Le propriétaire appelle `createEmployee` avec le rôle `manager` ou `seller` et un mot de passe temporaire. La première connexion a le scope `password_change`.
 
-`registration.steps` vaut `company`, `store`, puis `catalog`.
-
-`inviteMember` crée une invitation locale de 7 jours. Le jeton n'est renvoyé qu'à la création. L'offre Essentiel refuse les rôles opérationnels. `acceptInvitation` ouvre l'adhésion de l'utilisateur authentifié qui présente le jeton, puis l'affecte à la boutique. Le même utilisateur peut présenter le jeton à nouveau. Un autre utilisateur ne peut pas le réutiliser. L'API n'envoie pas l'e-mail.
+`inviteMember` reste disponible pour les anciens clients. L'offre Essentiel refuse toujours les rôles opérationnels.
 
 ## Lecture
 

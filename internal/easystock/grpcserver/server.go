@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -206,7 +207,15 @@ func toStatus(err error) error {
 		return err
 	}
 	if de, ok := domain.As(err); ok {
-		return status.Error(codeFor(de.Code), de.Message)
+		st := status.New(codeFor(de.Code), de.Message)
+		reason := de.Reason
+		if reason == "" {
+			reason = de.Code
+		}
+		if detailed, detailErr := st.WithDetails(&errdetails.ErrorInfo{Domain: "easystock", Reason: reason}); detailErr == nil {
+			return detailed.Err()
+		}
+		return st.Err()
 	}
 	return status.Error(codes.Internal, "L'opération n'a pas pu être enregistrée.")
 }

@@ -27,6 +27,15 @@ func (e *Error) Error() string {
 	return e.Reason
 }
 
+// Extensions exposes a stable business code to GraphQL clients.
+func (e *Error) Extensions() map[string]interface{} {
+	code := e.Reason
+	if code == "" {
+		code = e.Code
+	}
+	return map[string]interface{}{"code": code}
+}
+
 func As(err error) (*Error, bool) {
 	var target *Error
 	if errors.As(err, &target) {

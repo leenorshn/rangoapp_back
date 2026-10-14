@@ -16,6 +16,15 @@ type Principal struct {
 	RequestID  string
 	ActorType  string
 	OperatorID string
+	SessionID          uuid.UUID
+	Scope              string
+	MustChangePassword bool
+	PlatformAdmin      bool
+}
+
+// Restricted is a session that may only change the password or sign out.
+func (p Principal) Restricted() bool {
+	return p.Scope == "password_change" || p.MustChangePassword
 }
 
 func (p Principal) ActorKind() string {

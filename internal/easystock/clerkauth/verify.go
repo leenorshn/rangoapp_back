@@ -1,3 +1,5 @@
+// Package clerkauth verifies historical Clerk session tokens.
+// The API no longer calls it. New sessions are issued by package authn.
 package clerkauth
 
 import (

@@ -4,9 +4,12 @@ import (
 	"context"
 	"time"
 
+	"rangoapp/internal/easystock/authn"
+	"rangoapp/internal/easystock/billing"
 	"rangoapp/internal/easystock/catalog"
 	"rangoapp/internal/easystock/commerce"
 	"rangoapp/internal/easystock/contexttoken"
+	"rangoapp/internal/easystock/domain"
 	commercev1 "rangoapp/internal/easystock/gen/commercev1"
 	subscriptionv1 "rangoapp/internal/easystock/gen/subscriptionv1"
 	"rangoapp/internal/easystock/identity"
@@ -78,6 +81,8 @@ type Deps struct {
 	Plans         PlanClient
 	Catalog       CatalogFunc
 	Identity      *identity.Service
+	Auth          *authn.Service
+	Billing       *billing.Service
 	Commerce      *commerce.Service
 	Reads         *readmodel.Service
 	Reports       *reports.Service
@@ -158,7 +163,7 @@ func Schema(deps Deps) (graphql.Schema, error) {
 				}
 				view, err := deps.Plans.GetSubscription(ctx, &subscriptionv1.GetSubscriptionRequest{})
 				if err != nil {
-					return nil, err
+					return nil, fromGRPC(err)
 				}
 				return map[string]any{"planCode": view.GetPlanCode(), "status": view.GetStatus(), "source": view.GetSource()}, nil
 			},
@@ -174,6 +179,9 @@ func Schema(deps Deps) (graphql.Schema, error) {
 				member, ok := sessionUser(p.Context)
 				if !ok {
 					return nil, errUnavailable("Authentification requise.")
+				}
+				if err := rejectRestricted(member); err != nil {
+					return nil, err
 				}
 				if member.CompanyID == uuid.Nil {
 					return nil, errUnavailable("Créez ou sélectionnez une entreprise pour continuer.")
@@ -214,6 +222,10 @@ func Schema(deps Deps) (graphql.Schema, error) {
 			},
 		},
 	}
+	authQueries, authMutations := authAPI(deps)
+	for name, field := range authQueries {
+		queryFields[name] = field
+	}
 	orgQueries, orgMutations := orgAPI(deps)
 	for name, field := range orgQueries {
 		queryFields[name] = field
@@ -246,7 +258,7 @@ func Schema(deps Deps) (graphql.Schema, error) {
 				}
 				out, err := deps.Sales.ConfirmSale(ctx, req)
 				if err != nil {
-					return nil, err
+					return nil, fromGRPC(err)
 				}
 				result := map[string]any{
 					"saleId": out.GetSaleId(), "currency": out.GetCurrency(),
@@ -258,6 +270,9 @@ func Schema(deps Deps) (graphql.Schema, error) {
 				return result, nil
 			},
 		},
+	}
+	for name, field := range authMutations {
+		mutationFields[name] = field
 	}
 	for name, field := range orgMutations {
 		mutationFields[name] = field
@@ -273,6 +288,9 @@ func signed(ctx context.Context, secret string) (tenant.Principal, context.Conte
 	member, ok := sessionUser(ctx)
 	if !ok {
 		return tenant.Principal{}, ctx, errUnavailable("Authentification requise.")
+	}
+	if err := rejectRestricted(member); err != nil {
+		return tenant.Principal{}, ctx, err
 	}
 	if member.CompanyID == uuid.Nil {
 		return tenant.Principal{}, ctx, errUnavailable("Créez ou sélectionnez une entreprise pour continuer.")
@@ -350,10 +368,20 @@ func (e unavailable) Error() string { return string(e) }
 
 func errUnavailable(message string) error { return unavailable(message) }
 
+func rejectRestricted(member tenant.Principal) error {
+	if member.Restricted() {
+		return domain.FailedPrecondition("MUST_CHANGE_PASSWORD", "Changez le mot de passe temporaire avant de continuer.")
+	}
+	return nil
+}
+
 func requireCompany(ctx context.Context) (tenant.Principal, error) {
 	member, ok := sessionUser(ctx)
 	if !ok {
 		return tenant.Principal{}, errUnavailable("Authentification requise.")
+	}
+	if err := rejectRestricted(member); err != nil {
+		return tenant.Principal{}, err
 	}
 	if member.CompanyID == uuid.Nil {
 		return tenant.Principal{}, errUnavailable("Créez ou sélectionnez une entreprise pour continuer.")

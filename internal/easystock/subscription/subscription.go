@@ -247,31 +247,27 @@ func (s *Service) transitionOne(ctx context.Context, companyID uuid.UUID, now ti
 		return err
 	}
 	next := status
-	var graceEnd *time.Time
 	switch status {
 	case "trialing":
 		if trial != nil && !now.Before(*trial) {
-			next = "grace"
-			end := trial.AddDate(0, 0, GraceDays)
-			graceEnd = &end
+			next = "expired"
 		}
-	case "active":
-		if period != nil && !now.Before(*period) {
-			next = "grace"
-			end := period.AddDate(0, 0, GraceDays)
-			graceEnd = &end
+	case "active", "grace":
+		end := period
+		if end == nil {
+			end = trial
 		}
-	case "grace":
-		if grace != nil && !now.Before(*grace) {
+		if end != nil && !now.Before(*end) {
 			next = "expired"
 		}
 	}
+	_ = grace
 	if next != status {
 		if _, err := tx.Exec(ctx, `
 			UPDATE subscription_snapshots
-			SET status = $2, grace_ends_at = COALESCE($3, grace_ends_at)
+			SET status = $2, lifecycle = 'expired'
 			WHERE company_id = $1
-		`, companyID, next, graceEnd); err != nil {
+		`, companyID, next); err != nil {
 			return err
 		}
 	}

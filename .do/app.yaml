@@ -1,13 +1,16 @@
 # EasyStock on App Platform. Import this spec, then fill the SECRET values.
 # gRPC listens only on the private network. The public route is the API.
 name: easystock
-region: nyc
+region: fra
 
 databases:
-  - name: easystock-db
+  - name: shared-pg
     engine: PG
-    version: "16"
-    production: false
+    version: "18"
+    production: true
+    cluster_name: db-pgsql-fra1-64779-jobs
+    db_name: easystock_db
+    db_user: easystock_user
 
 services:
   - name: grpc
@@ -17,7 +20,7 @@ services:
       deploy_on_push: true
     dockerfile_path: Dockerfile.digitalocean
     source_dir: /
-    run_command: grpc
+    run_command: /app/easystock grpc
     internal_ports:
       - 7443
     instance_count: 1
@@ -41,7 +44,7 @@ services:
       deploy_on_push: true
     dockerfile_path: Dockerfile.digitalocean
     source_dir: /
-    run_command: api
+    run_command: /app/easystock api
     http_port: 8080
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
@@ -68,23 +71,44 @@ services:
         value: grpc:7443
       - key: GRPC_INSECURE_DEV
         value: "true"
-      - key: CLERK_WEBHOOK_SECRET
+      - key: APP_ENV
+        value: production
+      - key: AUTH_JWT_SECRET
         scope: RUN_TIME
         type: SECRET
-      - key: CLERK_JWKS_URL
+      - key: AUTH_OTP_SECRET
         scope: RUN_TIME
         type: SECRET
-      - key: CLERK_ISSUER
+      - key: PHONE_DEFAULT_REGION
+        value: CD
+      - key: SMS_PROVIDER
         scope: RUN_TIME
         type: SECRET
-      - key: CLERK_AUTHORIZED_PARTIES
+      - key: SMS_HTTP_URL
         scope: RUN_TIME
         type: SECRET
+      - key: SMS_HTTP_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: PUSH_PROVIDER
+        scope: RUN_TIME
+        type: SECRET
+      - key: PUSH_HTTP_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: PUSH_HTTP_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: AUTH_CORS_ORIGINS
+        scope: RUN_TIME
+        type: SECRET
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
       - key: S3_ENDPOINT
         scope: RUN_TIME
         type: SECRET
       - key: S3_REGION
-        value: nyc3
+        value: eu-central-1
       - key: S3_BUCKET
         scope: RUN_TIME
         type: SECRET
@@ -109,9 +133,47 @@ services:
         - Content-Type
         - Authorization
         - X-Request-Id
+        - X-EasyStock-CSRF
+        - X-EasyStock-Company
       expose_headers:
         - Content-Length
       max_age: 86400
+
+workers:
+  - name: reminders
+    github:
+      repo: leenorshn/rangoapp_back
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile.digitalocean
+    source_dir: /
+    run_command: /app/easystock worker
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      - key: DATABASE_URL_JOB
+        scope: RUN_TIME
+        type: SECRET
+      - key: APP_ENV
+        value: production
+      - key: SMS_PROVIDER
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMS_HTTP_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMS_HTTP_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: PUSH_PROVIDER
+        scope: RUN_TIME
+        type: SECRET
+      - key: PUSH_HTTP_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: PUSH_HTTP_TOKEN
+        scope: RUN_TIME
+        type: SECRET
 
 jobs:
   - name: migrate
@@ -122,11 +184,11 @@ jobs:
       deploy_on_push: true
     dockerfile_path: Dockerfile.digitalocean
     source_dir: /
-    run_command: migrate
+    run_command: /app/easystock migrate
     instance_size_slug: apps-s-1vcpu-0.5gb
     envs:
       - key: DATABASE_URL
-        value: ${easystock-db.DATABASE_URL}
+        value: ${shared-pg.DATABASE_URL}
       - key: SET_ROLE_PASSWORDS
         value: "true"
       - key: APP_DB_PASSWORD

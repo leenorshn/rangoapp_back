@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"time"
 
 	"rangoapp/internal/easystock/domain"
 	"rangoapp/internal/easystock/money"
@@ -54,7 +55,9 @@ type Decision struct {
 var rolePerms = map[string]map[string]struct{}{
 	"owner":              permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, BillingManage, CatalogManage, RatesManage),
 	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
+	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
 	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
+	"seller":             permSet(SalesCreate),
 	"cashier":            permSet(SalesCreate, CashOpen, CashClose, DebtsCollect),
 	"stockkeeper":        permSet(StockReceive, StockAdjust, ReportsRead),
 	"accountant":         permSet(ReportsRead, ReportsExport, MarginsRead),
@@ -75,7 +78,7 @@ func RoleAllows(role, perm string) bool {
 
 func IsOperational(role string) bool {
 	switch role {
-	case "store_manager", "cashier", "stockkeeper", "accountant":
+	case "manager", "seller", "store_manager", "cashier", "stockkeeper", "accountant":
 		return true
 	default:
 		return false
@@ -194,26 +197,56 @@ func authorize(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, stor
 		decision.Role, storeCredit, companyCredit, defaultCredit, false,
 	)
 
+	var lifecycle string
+	var trialEnd, periodEnd, archived *time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT s.status, s.plan_code, p.allow_export, p.allow_operational_roles, p.allow_multistore,
+		SELECT s.status, COALESCE(s.lifecycle, 'active'), s.plan_code, s.trial_ends_at, s.current_period_end, c.archived_at,
+		       p.allow_export, p.allow_operational_roles, p.allow_multistore,
 		       p.max_stores, p.max_active_members
 		FROM subscription_snapshots s
 		JOIN subscription_plans p ON p.code = s.plan_code
+		JOIN companies c ON c.id = s.company_id
 		WHERE s.company_id = $1
 	`, companyID).Scan(
-		&decision.SubscriptionStatus, &decision.PlanCode, &decision.AllowExport, &decision.AllowOperational,
+		&decision.SubscriptionStatus, &lifecycle, &decision.PlanCode, &trialEnd, &periodEnd, &archived,
+		&decision.AllowExport, &decision.AllowOperational,
 		&decision.AllowMultistore, &decision.MaxStores, &decision.MaxMembers,
 	)
 	if err != nil {
-		return Decision{}, domain.FailedPrecondition("subscription", "Aucun abonnement n'est enregistré pour cette entreprise.")
+		return Decision{}, domain.FailedPrecondition("SUBSCRIPTION_REQUIRED", "Aucun abonnement n'est enregistré pour cette entreprise.")
 	}
-	if gateCommercial && IsCommercial(perm) && !CommercialOpen(decision.SubscriptionStatus) {
-		return Decision{}, domain.FailedPrecondition("subscription_expired", "L'abonnement ne permet plus d'enregistrer de nouvelles opérations. Vous pouvez encore consulter et exporter les données autorisées.")
+	if perm != BillingManage {
+		if err := SubscriptionBlock(decision.SubscriptionStatus, lifecycle, trialEnd, periodEnd, archived, time.Now().UTC()); err != nil {
+			return Decision{}, err
+		}
 	}
 	if (perm == ReportsExport || perm == MarginsRead) && !decision.AllowExport {
 		return Decision{}, domain.PermissionDenied("plan", "Cette offre ne comprend pas les exports ni les marges. Passez à l'offre Pro pour les activer.")
 	}
 	return decision, nil
+}
+
+// SubscriptionBlock refuses business operations from the real expiry, even when
+// the periodic job has not yet stored status expired.
+// BillingManage stays allowed so the owner can renew.
+func SubscriptionBlock(status, lifecycle string, trial, period, archived *time.Time, now time.Time) error {
+	if archived != nil || lifecycle == "closed" || status == "canceled" || lifecycle == "inactive" {
+		return domain.FailedPrecondition("SUBSCRIPTION_REQUIRED", "Cette entreprise n'a pas d'abonnement actif.")
+	}
+	expiry := period
+	if status == "trialing" {
+		expiry = trial
+	}
+	if status == "expired" || (expiry != nil && !now.Before(*expiry)) {
+		return domain.FailedPrecondition("SUBSCRIPTION_EXPIRED", "L'abonnement de votre entreprise a expiré.")
+	}
+	if status != "trialing" && status != "active" && status != "grace" {
+		return domain.FailedPrecondition("SUBSCRIPTION_REQUIRED", "Cette entreprise n'a pas d'abonnement actif.")
+	}
+	if expiry == nil && status == "trialing" {
+		return domain.FailedPrecondition("SUBSCRIPTION_REQUIRED", "Cette entreprise n'a pas d'abonnement actif.")
+	}
+	return nil
 }
 
 func ceiling(role string, storeValue, companyValue, fallback pgtype.Numeric, rate bool) (unlimited, has bool, max decimal.Decimal) {

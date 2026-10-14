@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -14,15 +14,18 @@ import (
 	"time"
 
 	"rangoapp/internal/easystock/api"
+	"rangoapp/internal/easystock/authn"
+	"rangoapp/internal/easystock/billing"
 	"rangoapp/internal/easystock/catalog"
-	"rangoapp/internal/easystock/clerkauth"
 	"rangoapp/internal/easystock/commerce"
 	"rangoapp/internal/easystock/grpcserver"
 	"rangoapp/internal/easystock/identity"
 	"rangoapp/internal/easystock/legacyimport"
 	"rangoapp/internal/easystock/media"
 	"rangoapp/internal/easystock/migrate"
+	"rangoapp/internal/easystock/notify"
 	"rangoapp/internal/easystock/readmodel"
+	"rangoapp/internal/easystock/reminders"
 	"rangoapp/internal/easystock/reports"
 	"rangoapp/internal/easystock/subscription"
 	"rangoapp/internal/easystock/tenant"
@@ -41,7 +44,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: easystock [migrate|grpc|api|import]")
+		log.Fatal("usage: easystock [migrate|grpc|api|worker|import]")
 	}
 	ctx := context.Background()
 	switch os.Args[1] {
@@ -55,6 +58,8 @@ func main() {
 		serveGRPC(ctx)
 	case "api":
 		serveAPI(ctx)
+	case "worker":
+		serveWorker(ctx)
 	case "import":
 		runImport(ctx)
 	default:
@@ -114,8 +119,9 @@ func serveAPI(ctx context.Context) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.Handle("POST /webhooks/clerk", clerkHandler(identity.New(pool)))
-	mux.Handle("POST /graphql", graphQLHandler(ctx, identity.New(pool)))
+	handler := graphQLHandler(ctx, pool)
+	mux.Handle("POST /graphql", handler)
+	mux.Handle("OPTIONS /graphql", handler)
 	if os.Getenv("GRAPHQL_PLAYGROUND") == "true" {
 		mux.Handle("GET /playground", api.Playground("EasyStock", "/graphql"))
 	}
@@ -135,38 +141,42 @@ func serveAPI(ctx context.Context) {
 	_ = server.Shutdown(shutdown)
 }
 
-func clerkHandler(svc *identity.Service) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+func graphQLHandler(ctx context.Context, identityPool *pgxpool.Pool) http.Handler {
+	members := identity.New(identityPool)
+	cfg, err := loadAuthConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	production := os.Getenv("APP_ENV") == "production"
+	sms, err := notify.OpenSMS(env("SMS_PROVIDER", "dev"), os.Getenv("SMS_HTTP_URL"), os.Getenv("SMS_HTTP_TOKEN"), production)
+	if err != nil {
+		log.Fatal(err)
+	}
+	limiter := authn.Limiter(authn.NewPGLimiter(identityPool))
+	if rawURL := os.Getenv("REDIS_URL"); rawURL != "" {
+		redisLimiter, err := authn.NewRedisLimiter(rawURL)
 		if err != nil {
-			http.Error(w, "invalid body", http.StatusBadRequest)
-			return
+			log.Fatal(err)
 		}
-		if err := identity.VerifySvix(os.Getenv("CLERK_WEBHOOK_SECRET"), r.Header.Get("svix-id"), r.Header.Get("svix-timestamp"), r.Header.Get("svix-signature"), body, time.Now()); err != nil {
-			http.Error(w, "invalid signature", http.StatusUnauthorized)
-			return
-		}
-		event, err := identity.ParseEvent(r.Header.Get("svix-id"), r.Header.Get("svix-timestamp"), body)
-		if err != nil {
-			http.Error(w, "invalid event", http.StatusBadRequest)
-			return
-		}
-		if err := svc.Apply(r.Context(), event); err != nil {
-			http.Error(w, "retry", http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-}
-
-func graphQLHandler(ctx context.Context, members *identity.Service) http.Handler {
-	deps := api.Deps{ContextSecret: os.Getenv("INTERNAL_CONTEXT_SECRET"), Identity: members}
+		limiter = redisLimiter
+	} else if production {
+		log.Printf("REDIS_URL est vide: les limites de débit utilisent PostgreSQL")
+	}
+	authSvc := authn.New(identityPool, cfg, sms, limiter)
+	store, err := mediaStore()
+	if err != nil {
+		log.Fatal(err)
+	}
+	deps := api.Deps{
+		ContextSecret: os.Getenv("INTERNAL_CONTEXT_SECRET"),
+		Identity:      members,
+		Auth:          authSvc,
+		Billing:       billing.New(identityPool, store),
+	}
 	if os.Getenv("DATABASE_URL_APP") != "" {
 		appPool := mustPool(ctx, "DATABASE_URL_APP")
 		deps.Commerce = commerce.New(appPool)
-		if store, err := mediaStore(); err != nil {
-			log.Fatal(err)
-		} else if store != nil {
+		if store != nil {
 			deps.Commerce.SetObjects(store)
 		}
 		deps.Reads = readmodel.New(appPool)
@@ -200,19 +210,63 @@ func graphQLHandler(ctx context.Context, members *identity.Service) http.Handler
 		log.Fatal(err)
 	}
 	session := api.SessionConfig{
-		Identity:           members,
-		Issuer:             os.Getenv("CLERK_ISSUER"),
-		Parties:            strings.Split(os.Getenv("CLERK_AUTHORIZED_PARTIES"), ","),
+		Auth:               authSvc,
 		AllowIntrospection: os.Getenv("GRAPHQL_PLAYGROUND") == "true",
-	}
-	if rawURL := os.Getenv("CLERK_JWKS_URL"); rawURL != "" {
-		keyfn, err := clerkauth.FetchKeyfunc(ctx, rawURL, nil)
-		if err != nil {
-			log.Fatal(err)
-		}
-		session.Keyfunc = keyfn
+		CORSOrigins:        splitCSV(os.Getenv("AUTH_CORS_ORIGINS")),
+		CookieSecure:       production || os.Getenv("AUTH_COOKIE_SECURE") == "true",
 	}
 	return api.NewHTTP(schema, session)
+}
+
+func serveWorker(ctx context.Context) {
+	production := os.Getenv("APP_ENV") == "production"
+	sms, err := notify.OpenSMS(env("SMS_PROVIDER", "dev"), os.Getenv("SMS_HTTP_URL"), os.Getenv("SMS_HTTP_TOKEN"), production)
+	if err != nil {
+		log.Fatal(err)
+	}
+	push, err := notify.OpenPush(env("PUSH_PROVIDER", "dev"), os.Getenv("PUSH_HTTP_URL"), os.Getenv("PUSH_HTTP_TOKEN"), production)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pool := mustPool(ctx, "DATABASE_URL_JOB")
+	defer pool.Close()
+	worker := reminders.New(pool, sms, push)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		waitForSignal()
+		cancel()
+	}()
+	log.Printf("easystock worker ticking every 5 minutes")
+	worker.Run(runCtx)
+}
+
+func loadAuthConfig() (authn.Config, error) {
+	cfg := authn.DefaultConfig()
+	cfg.JWTSecret = os.Getenv("AUTH_JWT_SECRET")
+	cfg.OTPSecret = os.Getenv("AUTH_OTP_SECRET")
+	if region := os.Getenv("PHONE_DEFAULT_REGION"); region != "" {
+		cfg.Region = region
+	}
+	if len(cfg.JWTSecret) < 32 || len(cfg.OTPSecret) < 32 {
+		return cfg, errors.New("AUTH_JWT_SECRET and AUTH_OTP_SECRET must be at least 32 characters")
+	}
+	return cfg, nil
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func mediaStore() (media.Store, error) {

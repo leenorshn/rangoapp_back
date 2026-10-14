@@ -360,8 +360,8 @@ func TestMarginExportAndExpiredSubscription(t *testing.T) {
 	if _, err := commerce.New(app).ConfirmSale(ctx, w.p, saleInput(w, "expired", "1", "10")); err == nil {
 		t.Fatal("expired subscription accepted a sale")
 	}
-	if _, err := reportsSvc.NetSales(ctx, w.p, filter); err != nil {
-		t.Fatalf("read after expiry: %v", err)
+	if _, err := reportsSvc.NetSales(ctx, w.p, filter); err == nil {
+		t.Fatal("expired subscription still returned a report")
 	}
 }
 

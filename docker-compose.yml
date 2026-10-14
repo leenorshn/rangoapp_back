@@ -87,10 +87,14 @@ services:
       COMMERCE_GRPC_ADDR: grpc:7443
       INTERNAL_CONTEXT_SECRET: ${INTERNAL_CONTEXT_SECRET:-dev-only-internal-context-secret-32}
       GRPC_INSECURE_DEV: "true"
-      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
-      CLERK_ISSUER: ${CLERK_ISSUER:-}
-      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
+      APP_ENV: development
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-auth-jwt-secret-32-chars}
+      AUTH_OTP_SECRET: ${AUTH_OTP_SECRET:-dev-only-auth-otp-secret-32-chars}
+      PHONE_DEFAULT_REGION: CD
+      SMS_PROVIDER: dev
+      PUSH_PROVIDER: dev
+      REDIS_URL: redis://redis:6379/0
+      AUTH_CORS_ORIGINS: http://localhost:3000
       GRAPHQL_PLAYGROUND: "true"
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
@@ -104,6 +108,26 @@ services:
       roles:
         condition: service_completed_successfully
       minio-init:
+        condition: service_completed_successfully
+    networks: [internal]
+    stop_grace_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    networks: [internal]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.easystock
+    command: ["worker"]
+    environment:
+      DATABASE_URL_JOB: postgres://easystock_job:${JOB_DB_PASSWORD:-easystock-job-dev}@postgres:5432/easystock?sslmode=disable
+      APP_ENV: development
+      SMS_PROVIDER: dev
+      PUSH_PROVIDER: dev
+    depends_on:
+      roles:
         condition: service_completed_successfully
     networks: [internal]
     stop_grace_period: 20s
