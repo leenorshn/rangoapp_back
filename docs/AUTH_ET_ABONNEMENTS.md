@@ -199,9 +199,12 @@ Après déploiement, un propriétaire dont le numéro est unique et déjà en E.
 | `AUTH_OTP_SECRET` | HMAC des codes SMS, distinct du précédent |
 | `PHONE_DEFAULT_REGION` | Région des numéros locaux, `CD` par défaut |
 | `APP_ENV` | `production` interdit les fournisseurs simulés |
-| `SMS_PROVIDER` | `dev` en local, `http` en production |
-| `SMS_HTTP_URL` | `POST` JSON `{"to","body","idempotency_key"}` |
-| `SMS_HTTP_TOKEN` | Bearer envoyé à la passerelle, si elle en exige un |
+| `SMS_PROVIDER` | `dev` en local, `uzashop` ou `http` en production |
+| `SMS_HTTP_URL` | `POST` JSON `{"to","body","idempotency_key"}` lorsque `SMS_PROVIDER=http` |
+| `SMS_HTTP_TOKEN` | Bearer envoyé à la passerelle HTTP, si elle en exige un |
+| `SMS_UZA_TOKEN` | `tokenKey` de l'abonnement [UZASHOP SMS Management V2](https://sms.uzashop.co/api/documentation#/SMS%20Management%20V2), requis si `SMS_PROVIDER=uzashop` |
+| `SMS_UZA_SENDER` | Nom d'expéditeur, 11 caractères au plus. Défaut `EasyStock` |
+| `SMS_UZA_BASE_URL` | Origine de l'API. Défaut `https://sms.uzashop.co`. L'envoi appelle `POST /api/v2/sms/send` |
 | `PUSH_PROVIDER` | `dev` ou `http` |
 | `PUSH_HTTP_URL` | `POST` JSON `{"token","title","body","idempotency_key"}` |
 | `PUSH_HTTP_TOKEN` | Bearer de la passerelle push |
@@ -209,7 +212,9 @@ Après déploiement, un propriétaire dont le numéro est unique et déjà en E.
 | `AUTH_CORS_ORIGINS` | Origines web, séparées par des virgules |
 | `AUTH_COOKIE_SECURE` | `true` force le cookie Secure |
 
-`SMS_PROVIDER=dev` journalise « SMS simulé, non envoyé » et n'émet rien. Ce n'est pas un SMS délivré. Le même avertissement vaut pour le push. Aucune passerelle réelle n'est branchée dans ce dépôt : l'adaptateur HTTP est le point de raccordement.
+`SMS_PROVIDER=dev` journalise « SMS simulé, non envoyé » et n'émet rien. Ce n'est pas un SMS délivré. Le même avertissement vaut pour le push.
+
+`SMS_PROVIDER=uzashop` envoie les codes et les rappels via `POST /api/v2/sms/send`. Le corps contient `tokenKey`, `phoneNumber` (E.164 sans le `+`), `senderName` et `message` (160 caractères au plus). Un délai dépassé reste ambigu et n'est pas renvoyé. Un solde insuffisant, un abonnement inactif ou une validation refusée n'est pas retenté tout de suite. L'adaptateur `http` reste disponible pour une autre passerelle.
 
 Le numéro `+243978154329` (ou `0978154329`) accepte toujours le code `123123` après une demande d'OTP, y compris sur le déploiement cloud. Aucun SMS n'est envoyé pour ce numéro. L'expiration, le délai de renvoi et le nombre d'essais restent en vigueur. Les autres numéros reçoivent un code aléatoire.
 

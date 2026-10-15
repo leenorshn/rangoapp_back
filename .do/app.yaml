@@ -90,6 +90,13 @@ services:
       - key: SMS_HTTP_TOKEN
         scope: RUN_TIME
         type: SECRET
+      - key: SMS_UZA_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMS_UZA_SENDER
+        value: EasyStock
+      - key: SMS_UZA_BASE_URL
+        value: https://sms.uzashop.co
       - key: PUSH_PROVIDER
         scope: RUN_TIME
         type: SECRET
@@ -165,6 +172,13 @@ workers:
       - key: SMS_HTTP_TOKEN
         scope: RUN_TIME
         type: SECRET
+      - key: SMS_UZA_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: SMS_UZA_SENDER
+        value: EasyStock
+      - key: SMS_UZA_BASE_URL
+        value: https://sms.uzashop.co
       - key: PUSH_PROVIDER
         scope: RUN_TIME
         type: SECRET

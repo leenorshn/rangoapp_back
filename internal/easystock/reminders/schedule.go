@@ -1,6 +1,10 @@
 package reminders
 
-import "time"
+import (
+	"time"
+
+	"rangoapp/internal/easystock/notify"
+)
 
 // RelevanceWindow is how long a slot stays sendable after its local instant.
 // A worker that was down longer than this does not replay the missed slot.
@@ -46,7 +50,7 @@ func DuePlans(now time.Time, loc *time.Location, expires time.Time, company stri
 	j1 := atClock(expires.AddDate(0, 0, -1), 9, 0, loc)
 	if now.Before(expires) {
 		add("j3", j3, []string{"push", "in_app"}, "Abonnement", "EasyStock: l'abonnement de "+company+" expire le "+expires.Format("02/01")+".")
-		add("j1", j1, []string{"sms", "push", "in_app"}, "Abonnement", "EasyStock: abonnement "+company+" expire demain. Renouvelez dans l'application.")
+		add("j1", j1, []string{"sms", "push", "in_app"}, "Abonnement", notify.ReminderText("j1", company))
 		return capSMS(plans, 2)
 	}
 	day := dateOnly(now)
@@ -60,9 +64,9 @@ func DuePlans(now time.Time, loc *time.Location, expires time.Time, company stri
 	if late {
 		return nil
 	}
-	expiryBody := "EasyStock: l'abonnement de " + company + " a expiré. Renouvelez pour continuer."
-	morningBody := "EasyStock: rappel, abonnement " + company + " expiré. Renouvelez aujourd'hui."
-	eveningBody := "EasyStock: abonnement " + company + " toujours expiré. Ouvrez l'application pour payer."
+	expiryBody := notify.ReminderText("expired", company)
+	morningBody := notify.ReminderText("morning", company)
+	eveningBody := notify.ReminderText("evening", company)
 	if !expires.After(morning) {
 		body := morningBody
 		if sameDay(day, expires) || (sameDay(day, expires.AddDate(0, 0, 1)) && expires.After(atClock(expDay, 18, 0, loc))) {

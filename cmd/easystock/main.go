@@ -148,7 +148,7 @@ func graphQLHandler(ctx context.Context, identityPool *pgxpool.Pool) http.Handle
 		log.Fatal(err)
 	}
 	production := os.Getenv("APP_ENV") == "production"
-	sms, err := notify.OpenSMS(env("SMS_PROVIDER", "dev"), os.Getenv("SMS_HTTP_URL"), os.Getenv("SMS_HTTP_TOKEN"), production)
+	sms, err := openSMS(production)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func graphQLHandler(ctx context.Context, identityPool *pgxpool.Pool) http.Handle
 
 func serveWorker(ctx context.Context) {
 	production := os.Getenv("APP_ENV") == "production"
-	sms, err := notify.OpenSMS(env("SMS_PROVIDER", "dev"), os.Getenv("SMS_HTTP_URL"), os.Getenv("SMS_HTTP_TOKEN"), production)
+	sms, err := openSMS(production)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -239,6 +239,18 @@ func serveWorker(ctx context.Context) {
 	}()
 	log.Printf("easystock worker ticking every 5 minutes")
 	worker.Run(runCtx)
+}
+
+func openSMS(production bool) (notify.SMSProvider, error) {
+	return notify.OpenSMS(notify.SMSOptions{
+		Provider:   env("SMS_PROVIDER", "dev"),
+		HTTPURL:    os.Getenv("SMS_HTTP_URL"),
+		HTTPToken:  os.Getenv("SMS_HTTP_TOKEN"),
+		UzaBaseURL: os.Getenv("SMS_UZA_BASE_URL"),
+		UzaToken:   os.Getenv("SMS_UZA_TOKEN"),
+		UzaSender:  os.Getenv("SMS_UZA_SENDER"),
+		Production: production,
+	})
 }
 
 func loadAuthConfig() (authn.Config, error) {

@@ -3,10 +3,10 @@ package authn
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"rangoapp/internal/easystock/domain"
+	"rangoapp/internal/easystock/notify"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -94,7 +94,7 @@ func (s *Service) RequestOTP(ctx context.Context, purpose, rawPhone string, req 
 		_ = s.consumeChallenge(ctx, challengeID, now)
 		return domain.Internal("L'envoi du code est indisponible.")
 	}
-	body := fmt.Sprintf("EasyStock: code %s. Valable 5 min.", code)
+	body := notify.OTPText(purpose, code, s.cfg.OTPTTL)
 	if _, err := s.sms.Send(ctx, number, body, "otp:"+challengeID); err != nil {
 		_ = s.consumeChallenge(ctx, challengeID, now)
 		return domain.Internal("Le code n'a pas pu être envoyé.")

@@ -28,7 +28,7 @@ Le script installe Docker, ouvre les ports 22, 80 et 443, ajoute 1 Go de swap, g
 Fichier modèle : `env.digitalocean.example`.
 
 - `AUTH_JWT_SECRET` et `AUTH_OTP_SECRET` (au moins 32 caractères, générés par `setup-droplet.sh`)
-- `SMS_PROVIDER=http`, `SMS_HTTP_URL`, `SMS_HTTP_TOKEN`, `PUSH_PROVIDER=http`, `PUSH_HTTP_URL`, `PUSH_HTTP_TOKEN`
+- `SMS_PROVIDER=uzashop`, `SMS_UZA_TOKEN`, et au besoin `SMS_UZA_SENDER` et `SMS_UZA_BASE_URL`. L'ancien mode `SMS_PROVIDER=http` reste disponible avec `SMS_HTTP_URL` et `SMS_HTTP_TOKEN`. `PUSH_PROVIDER=http`, `PUSH_HTTP_URL`, `PUSH_HTTP_TOKEN`
 - `AUTH_CORS_ORIGINS`, liste explicite des origines du client web
 - `PHONE_DEFAULT_REGION=CD`
 - Spaces, si les photos et reçus sont utilisés : `S3_ENDPOINT` (`https://<région>.digitaloceanspaces.com`), `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_USE_PATH_STYLE=false`
@@ -59,7 +59,7 @@ URL publiques :
 - `POST /graphql`
 - `GET /health`
 
-`APP_ENV=production` refuse `SMS_PROVIDER=dev` et `PUSH_PROVIDER=dev`. Sans passerelle HTTP configurée, l’API et le worker ne démarrent pas.
+`APP_ENV=production` refuse `SMS_PROVIDER=dev` et `PUSH_PROVIDER=dev`. `SMS_PROVIDER=uzashop` exige `SMS_UZA_TOKEN`. `SMS_PROVIDER=http` exige `SMS_HTTP_URL`. Sans cela, l’API et le worker ne démarrent pas.
 
 ### 5. GitHub Actions
 
@@ -122,7 +122,7 @@ Le workflow **Deploy to DigitalOcean App Platform** est manuel. Secret suppléme
 
 - [ ] `GET /health` répond `ok` (le processus API écoute ; cette route ne vérifie pas PostgreSQL)
 - [ ] Les ports 5432 et 7443 ne répondent pas depuis l’extérieur
-- [ ] `AUTH_JWT_SECRET`, `AUTH_OTP_SECRET`, `SMS_PROVIDER=http` et `PUSH_PROVIDER=http` sont renseignés
+- [ ] `AUTH_JWT_SECRET`, `AUTH_OTP_SECRET`, `SMS_PROVIDER=uzashop` avec `SMS_UZA_TOKEN`, et `PUSH_PROVIDER=http` sont renseignés
 - [ ] Le worker journalise `easystock worker ticking every 5 minutes`
 - [ ] Le bucket Spaces existe dans la même région que `S3_REGION`
 - [ ] `docker compose ... logs grpc` affiche `easystock grpc listening`

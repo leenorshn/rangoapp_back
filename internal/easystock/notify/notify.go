@@ -185,22 +185,38 @@ func maskPhone(phone string) string {
 	return phone[:4] + "****" + phone[len(phone)-2:]
 }
 
+// SMSOptions selects the SMS gateway.
+// HTTPURL and HTTPToken apply to provider "http".
+// UzaBaseURL, UzaToken and UzaSender apply to provider "uzashop".
+type SMSOptions struct {
+	Provider   string
+	HTTPURL    string
+	HTTPToken  string
+	UzaBaseURL string
+	UzaToken   string
+	UzaSender  string
+	Production bool
+}
+
 // OpenSMS returns the configured provider.
 // provider "dev" is refused when production is true.
-func OpenSMS(provider, url, token string, production bool) (SMSProvider, error) {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
+// provider "uzashop" posts to UZASHOP SMS Management V2.
+func OpenSMS(opts SMSOptions) (SMSProvider, error) {
+	switch strings.ToLower(strings.TrimSpace(opts.Provider)) {
 	case "", "dev":
-		if production {
+		if opts.Production {
 			return nil, errors.New("SMS_PROVIDER=dev est interdit lorsque APP_ENV=production")
 		}
 		return &DevSMS{}, nil
 	case "http":
-		if url == "" {
+		if opts.HTTPURL == "" {
 			return nil, errors.New("SMS_HTTP_URL est requis lorsque SMS_PROVIDER=http")
 		}
-		return &HTTPSMS{URL: url, Token: token}, nil
+		return &HTTPSMS{URL: opts.HTTPURL, Token: opts.HTTPToken}, nil
+	case "uzashop":
+		return openUzaSMS(opts)
 	default:
-		return nil, fmt.Errorf("SMS_PROVIDER inconnu: %s", provider)
+		return nil, fmt.Errorf("SMS_PROVIDER inconnu: %s", opts.Provider)
 	}
 }
 
