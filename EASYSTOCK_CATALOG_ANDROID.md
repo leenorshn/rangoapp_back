@@ -2,7 +2,7 @@
 
 Contrat `POST /graphql`. Les montants, quantités et facteurs sont des chaînes décimales (`"500"`, `"1.5"`, `"24"`), jamais des flottants. Les dates sont des `DateTime` RFC3339. L'entreprise vient de la session : aucun `companyId` envoyé par l'application n'est lu.
 
-`confirmSale` ne change pas. Une ligne vendable se construit avec l'identifiant produit, le **nom** du conditionnement, la quantité de ce conditionnement et le `unitPrice` renvoyé pour la boutique et la devise.
+Une ligne vendable se construit avec l'identifiant produit, le **nom** du conditionnement, la quantité de ce conditionnement et le `unitPrice` renvoyé pour la boutique et la devise. Le parcours d'encaissement, y compris la dette et la date d'échéance, est décrit dans `EASYSTOCK_FAST_SALE_ANDROID.md`.
 
 ## Droits
 
@@ -122,7 +122,7 @@ query ($storeId: ID!, $after: DateTime, $afterId: ID) {
 
 La page suivante reprend `updatedAt` et `id` du dernier élément, avec le même `storeId`. Un produit archivé reste dans la page pour être retiré de la liste vendable. Un conditionnement `active: false` ne se vend plus. Les prix absents ont été retirés.
 
-`products(storeId, search, categoryId, after, afterId, limit)` liste les produits actifs. `product(id, storeId)` et `productByBarcode(storeId, barcode)` renvoient le même objet, avec `matchedUnitId` pour le code-barres reconnu.
+`products(storeId, search, categoryId, forSale, after, afterId, limit)` liste les produits actifs. Avec `forSale: true`, seuls les produits qui ont encore un conditionnement actif autorisé à la vente sont renvoyés, et les autres conditionnements sont omis. Si `storeId` est fourni, `availableQuantity` (unité de base) et `availability` (`available` ou `out_of_stock`) sont présents. `imageMediaId` est présent quand une image est enregistrée. `product(id, storeId)` et `productByBarcode(storeId, barcode)` renvoient le même objet, avec `matchedUnitId` pour le code-barres reconnu.
 
 ```graphql
 query ($id: ID!, $storeId: ID) {
