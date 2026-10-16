@@ -565,6 +565,8 @@ type StockMovement {
   quantity: String!
   originUnit: String
   originQuantity: String
+  # Facteur du conditionnement utilisé pour ce mouvement. Absent si l'historique ne le prouve pas.
+  originFactor: String
   originProvenance: String!
   # Densité utilisée pour cette conversion kg/litre. Absente si le mouvement est resté dans la même dimension. Ce n'est pas un coût.
   densityKgPerLiter: String

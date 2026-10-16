@@ -105,13 +105,18 @@ func postStockMovement(ctx context.Context, tx pgx.Tx, p tenant.Principal, store
 		value = money.Num(*exitValue)
 		currency = exitCurrency
 	}
+	factor := unit.factor
+	provenance := "recovered"
+	if conversionExplained(originQty, delta.Abs(), &factor, density) {
+		provenance = "recorded"
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO stock_movements (
 			id, company_id, store_id, product_id, quantity_delta, movement_type, reason,
 			ref_type, ref_id, actor_user_id, origin_unit_id, origin_unit_name, origin_quantity, origin_factor,
 			exit_value, exit_currency, density_kg_per_liter, origin_provenance
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'recorded')
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 	`, uuid.New(), p.CompanyID, storeID, productID, money.Num(delta), movementType, blankNull(reason),
-		refType, refID, p.UserID, unit.id, unit.name, money.Num(originQty), money.Num(unit.factor), value, currency, densityArg(density))
+		refType, refID, p.UserID, unit.id, unit.name, money.Num(originQty), money.Num(unit.factor), value, currency, densityArg(density), provenance)
 	return err
 }

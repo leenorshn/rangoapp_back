@@ -71,6 +71,7 @@ type resolvedLine struct {
 	UnitCost     decimal.Decimal
 	CostComplete bool
 	UnitName     string
+	Factor       decimal.Decimal
 	Density      *decimal.Decimal
 }
 
@@ -266,9 +267,9 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type, ref_type, ref_id, actor_user_id,
-				origin_unit_id, origin_unit_name, origin_quantity, density_kg_per_liter, origin_provenance
-			) VALUES ($1,$2,$3,$4,$5,'sale','sale',$6,$7,$8,$9,$10,$11,'recorded')
-		`, uuid.New(), p.CompanyID, in.StoreID, line.ProductID, money.Num(line.BaseQty.Neg()), saleID, p.UserID, line.UnitID, line.UnitName, money.Num(line.Quantity), densityArg(line.Density)); err != nil {
+				origin_unit_id, origin_unit_name, origin_quantity, origin_factor, density_kg_per_liter, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'sale','sale',$6,$7,$8,$9,$10,$11,$12,'recorded')
+		`, uuid.New(), p.CompanyID, in.StoreID, line.ProductID, money.Num(line.BaseQty.Neg()), saleID, p.UserID, line.UnitID, line.UnitName, money.Num(line.Quantity), money.Num(line.Factor), densityArg(line.Density)); err != nil {
 			return SaleResult{}, err
 		}
 		totals[line.ProductID] = totals[line.ProductID].Add(line.BaseQty)
@@ -461,6 +462,7 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 		UnitName:  line.UnitName,
 		Quantity:  line.Quantity,
 		BaseQty:   baseQty,
+		Factor:    factorDec,
 		Density:   density,
 		UnitPrice: unitPrice,
 		LineGross: money.Round(line.Quantity.Mul(unitPrice)),

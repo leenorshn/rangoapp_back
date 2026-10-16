@@ -206,9 +206,10 @@ func createStockTransfer(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 	for _, line := range lines {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_transfer_lines (
-				id, company_id, transfer_id, product_id, product_unit_id, quantity, factor, base_quantity
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		`, uuid.New(), p.CompanyID, id, line.unit.productID, line.unit.id, money.Num(line.qty), money.Num(line.unit.factor), money.Num(line.base)); err != nil {
+				id, company_id, transfer_id, product_id, product_unit_id, quantity, factor, base_quantity,
+				density_kg_per_liter
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		`, uuid.New(), p.CompanyID, id, line.unit.productID, line.unit.id, money.Num(line.qty), money.Num(line.unit.factor), money.Num(line.base), densityArg(line.density)); err != nil {
 			return TransferResult{}, err
 		}
 	}
@@ -473,7 +474,8 @@ func insertTransferEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, id 
 
 func loadTransferMoves(ctx context.Context, tx pgx.Tx, id uuid.UUID) ([]preparedMove, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT l.product_id, l.product_unit_id, u.name, l.quantity, l.factor, l.base_quantity, p.sku, p.name
+		SELECT l.product_id, l.product_unit_id, u.name, l.quantity, l.factor, l.base_quantity,
+		       l.density_kg_per_liter, p.sku, p.name
 		FROM stock_transfer_lines l
 		JOIN product_units u ON u.id = l.product_unit_id
 		JOIN products p ON p.id = l.product_id
@@ -487,9 +489,9 @@ func loadTransferMoves(ctx context.Context, tx pgx.Tx, id uuid.UUID) ([]prepared
 	var lines []preparedMove
 	for rows.Next() {
 		var productID, unitID uuid.UUID
-		var qty, factor, base pgtype.Numeric
+		var qty, factor, base, density pgtype.Numeric
 		var sku, productName, unitName string
-		if err := rows.Scan(&productID, &unitID, &unitName, &qty, &factor, &base, &sku, &productName); err != nil {
+		if err := rows.Scan(&productID, &unitID, &unitName, &qty, &factor, &base, &density, &sku, &productName); err != nil {
 			return nil, err
 		}
 		quantity, err := money.FromNum(qty)
@@ -504,9 +506,19 @@ func loadTransferMoves(ctx context.Context, tx pgx.Tx, id uuid.UUID) ([]prepared
 		if err != nil {
 			return nil, err
 		}
+		var used *decimal.Decimal
+		if density.Valid {
+			parsed, err := money.FromNum(density)
+			if err != nil {
+				return nil, err
+			}
+			used = &parsed
+		}
 		lines = append(lines, preparedMove{
-			unit: stockUnit{productID: productID, id: unitID, name: unitName, factor: factorDec, sku: sku, product: productName},
-			qty:  quantity, base: baseDec,
+			unit:    stockUnit{productID: productID, id: unitID, name: unitName, factor: factorDec, sku: sku, product: productName},
+			qty:     quantity,
+			base:    baseDec,
+			density: used,
 		})
 	}
 	return lines, rows.Err()

@@ -536,6 +536,7 @@ query ($store: ID!, $product: ID, $type: String, $actor: ID, $from: DateTime, $t
     quantity
     originUnit
     originQuantity
+    originFactor
     originProvenance
     densityKgPerLiter
     refType
@@ -547,7 +548,7 @@ query ($store: ID!, $product: ID, $type: String, $actor: ID, $from: DateTime, $t
 }
 ```
 
-`quantity` est signée, en unité de base. `originQuantity` est la quantité saisie dans `originUnit`. `from` et `to` sont inclusifs. Les deux bornes du curseur, `after` et `afterId`, avancent ensemble vers les mouvements plus anciens.
+`quantity` est signée, en unité de base. `originQuantity` est la quantité saisie dans `originUnit`. `originFactor` est le facteur de ce conditionnement au moment de l'opération. Il est absent quand l'historique ne le prouve pas. Avec `densityKgPerLiter`, la base se relit par quantité × facteur × densité, ou quantité × facteur ÷ densité, selon le sens masse/volume. Sans densité, la base est quantité × facteur. `from` et `to` sont inclusifs. Les deux bornes du curseur, `after` et `afterId`, avancent ensemble vers les mouvements plus anciens.
 
 `originProvenance` vaut :
 

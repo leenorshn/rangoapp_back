@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"rangoapp/internal/easystock/access"
 	"rangoapp/internal/easystock/domain"
@@ -103,14 +104,17 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 	}
 	total := decimal.Zero
 	type item struct {
-		id       uuid.UUID
-		product  uuid.UUID
-		unit     uuid.UUID
-		unitName string
-		qty      decimal.Decimal
-		base     decimal.Decimal
-		restock  bool
-		amount   decimal.Decimal
+		id         uuid.UUID
+		product    uuid.UUID
+		unit       uuid.UUID
+		unitName   string
+		qty        decimal.Decimal
+		base       decimal.Decimal
+		factor     *decimal.Decimal
+		density    *decimal.Decimal
+		provenance string
+		restock    bool
+		amount     decimal.Decimal
 	}
 	items := make([]item, 0, len(in.Lines))
 	for _, line := range in.Lines {
@@ -131,15 +135,16 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 		sold, _ := money.FromNum(soldQty)
 		base, _ := money.FromNum(baseQty)
 		netLine, _ := money.FromNum(lineNet)
-		var alreadyQty, alreadyAmount pgtype.Numeric
+		var alreadyQty, alreadyAmount, alreadyBase pgtype.Numeric
 		if err := tx.QueryRow(ctx, `
-			SELECT COALESCE(SUM(quantity), 0), COALESCE(SUM(amount), 0)
+			SELECT COALESCE(SUM(quantity), 0), COALESCE(SUM(amount), 0), COALESCE(SUM(base_quantity), 0)
 			FROM refund_items WHERE sale_item_id = $1
-		`, line.SaleItemID).Scan(&alreadyQty, &alreadyAmount); err != nil {
+		`, line.SaleItemID).Scan(&alreadyQty, &alreadyAmount, &alreadyBase); err != nil {
 			return RefundResult{}, err
 		}
 		prevQty, _ := money.FromNum(alreadyQty)
 		prevAmount, _ := money.FromNum(alreadyAmount)
+		prevBase, _ := money.FromNum(alreadyBase)
 		if prevQty.Add(line.Quantity).GreaterThan(sold) {
 			return RefundResult{}, domain.FailedPrecondition("refund_quantity", "La quantité retournée dépasse la quantité encore remboursable.")
 		}
@@ -149,8 +154,26 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 		} else {
 			amount = money.Round(netLine.Mul(line.Quantity).Div(sold))
 		}
-		baseBack := base.Mul(line.Quantity).Div(sold)
-		items = append(items, item{id: line.SaleItemID, product: productID, unit: unitID, unitName: unitName, qty: line.Quantity, base: baseBack, restock: line.Restock, amount: amount})
+		baseBack := refundBase(sold, base, prevQty, prevBase, line.Quantity)
+		if !baseBack.IsPositive() {
+			return RefundResult{}, domain.Invalid("quantity", "La quantité convertie est trop petite pour être stockée.")
+		}
+		traceName, factor, density, err := loadSaleTrace(ctx, tx, p.CompanyID, storeID, in.SaleID, productID, unitID, sold, base)
+		if err != nil {
+			return RefundResult{}, err
+		}
+		if traceName != "" {
+			unitName = traceName
+		}
+		provenance := "recovered"
+		if conversionExplained(line.Quantity, baseBack, factor, density) {
+			provenance = "recorded"
+		}
+		items = append(items, item{
+			id: line.SaleItemID, product: productID, unit: unitID, unitName: unitName,
+			qty: line.Quantity, base: baseBack, factor: factor, density: density, provenance: provenance,
+			restock: line.Restock, amount: amount,
+		})
 		total = total.Add(amount)
 	}
 	total = money.Round(total)
@@ -221,9 +244,9 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id,
-				origin_unit_id, origin_unit_name, origin_quantity, origin_provenance
-			) VALUES ($1,$2,$3,$4,$5,'refund',$6,'refund',$7,$8,$9,$10,$11,'recorded')
-		`, uuid.New(), p.CompanyID, storeID, line.product, money.Num(line.base), in.Reason, refundID, p.UserID, line.unit, line.unitName, money.Num(line.qty)); err != nil {
+				origin_unit_id, origin_unit_name, origin_quantity, origin_factor, density_kg_per_liter, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'refund',$6,'refund',$7,$8,$9,$10,$11,$12,$13,$14)
+		`, uuid.New(), p.CompanyID, storeID, line.product, money.Num(line.base), in.Reason, refundID, p.UserID, line.unit, line.unitName, money.Num(line.qty), factorArg(line.factor), densityArg(line.density), line.provenance); err != nil {
 			return RefundResult{}, err
 		}
 	}
@@ -260,4 +283,70 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 		return RefundResult{}, err
 	}
 	return RefundResult{RefundID: refundID.String(), Amount: total.String(), CashAmount: cashPart.String(), DebtAmount: debtPart.String()}, nil
+}
+
+// loadSaleTrace copies the conversion stored on the unique sale movement.
+// Zero or several matches return empty values. The current product density is never used.
+func loadSaleTrace(ctx context.Context, tx pgx.Tx, companyID, storeID, saleID, productID, unitID uuid.UUID, soldQty, soldBase decimal.Decimal) (string, *decimal.Decimal, *decimal.Decimal, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT origin_unit_name, origin_factor::text, density_kg_per_liter::text
+		FROM stock_movements
+		WHERE company_id = $1
+		  AND store_id = $2
+		  AND ref_type = 'sale'
+		  AND ref_id = $3
+		  AND product_id = $4
+		  AND origin_unit_id = $5
+		  AND origin_quantity = $6
+		  AND quantity_delta = $7
+	`, companyID, storeID, saleID, productID, unitID, money.Num(soldQty), money.Num(soldBase.Neg()))
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer rows.Close()
+	var name *string
+	var factorText, densityText *string
+	matches := 0
+	for rows.Next() {
+		matches++
+		if err := rows.Scan(&name, &factorText, &densityText); err != nil {
+			return "", nil, nil, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, nil, err
+	}
+	if matches != 1 {
+		return "", nil, nil, nil
+	}
+	factor, err := optionalDecimal(factorText)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	density, err := optionalDecimal(densityText)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if name == nil {
+		return "", factor, density, nil
+	}
+	return *name, factor, density, nil
+}
+
+func optionalDecimal(raw *string) (*decimal.Decimal, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	text := strings.TrimSpace(*raw)
+	if text == "" {
+		return nil, nil
+	}
+	parsed, err := decimal.NewFromString(text)
+	if err != nil {
+		return nil, err
+	}
+	if !parsed.IsPositive() {
+		return nil, nil
+	}
+	return &parsed, nil
 }

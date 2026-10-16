@@ -294,6 +294,7 @@ func stockAPI(deps Deps, moneyAmount *graphql.Object) (graphql.Fields, graphql.F
 			"quantity":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"originUnit":        &graphql.Field{Type: graphql.String},
 			"originQuantity":    &graphql.Field{Type: graphql.String},
+			"originFactor":      &graphql.Field{Type: graphql.String},
 			"originProvenance":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"densityKgPerLiter": &graphql.Field{Type: graphql.String},
 			"refType":           &graphql.Field{Type: graphql.String},
@@ -1153,6 +1154,9 @@ func movementsJSON(rows []readmodel.StockMovement) []any {
 		}
 		if row.OriginQuantity != "" {
 			item["originQuantity"] = row.OriginQuantity
+		}
+		if row.OriginFactor != "" {
+			item["originFactor"] = row.OriginFactor
 		}
 		item["originProvenance"] = provenanceOr(row.OriginProvenance, row.OriginUnit)
 		if row.DensityKgPerLiter != "" {

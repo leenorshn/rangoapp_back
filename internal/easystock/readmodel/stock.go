@@ -29,6 +29,9 @@ type StockMovement struct {
 	OriginUnit       string
 	OriginQuantity   string
 	OriginProvenance string
+	// OriginFactor is the packaging factor used for this movement.
+	// Empty means the historical factor was not proven.
+	OriginFactor string
 	// DensityKgPerLiter is the density snapshotted on a kg/litre conversion.
 	// Empty means the movement stayed in one dimension. It is not a purchase cost.
 	DensityKgPerLiter string
@@ -94,7 +97,7 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT m.id, m.product_id, p.sku, p.name, m.store_id, m.movement_type, m.quantity_delta,
-			       m.origin_unit_name, m.origin_quantity, m.origin_provenance, m.density_kg_per_liter::text,
+			       m.origin_unit_name, m.origin_quantity, m.origin_factor::text, m.origin_provenance, m.density_kg_per_liter::text,
 			       m.ref_type, m.ref_id, m.actor_user_id,
 			       COALESCE(m.reason, m.note, ''), m.created_at
 			FROM stock_movements m
@@ -117,11 +120,11 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 			var item StockMovement
 			var delta pgtype.Numeric
 			var originQty pgtype.Numeric
-			var origin, provenance, density, refType *string
+			var origin, factorText, provenance, density, refType *string
 			var refID, actor *uuid.UUID
 			if err := rows.Scan(
 				&item.ID, &item.ProductID, &item.SKU, &item.ProductName, &item.StoreID, &item.Type, &delta,
-				&origin, &originQty, &provenance, &density, &refType, &refID, &actor, &item.Reason, &item.CreatedAt,
+				&origin, &originQty, &factorText, &provenance, &density, &refType, &refID, &actor, &item.Reason, &item.CreatedAt,
 			); err != nil {
 				return err
 			}
@@ -140,6 +143,13 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 					return err
 				}
 				item.OriginQuantity = parsed.String()
+			}
+			if factorText != nil && strings.TrimSpace(*factorText) != "" {
+				parsed, err := decimal.NewFromString(*factorText)
+				if err != nil {
+					return err
+				}
+				item.OriginFactor = parsed.String()
 			}
 			item.OriginProvenance = "legacy_unknown"
 			if provenance != nil && *provenance != "" {

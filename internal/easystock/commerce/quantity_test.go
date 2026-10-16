@@ -67,3 +67,50 @@ func reason(err error) string {
 	}
 	return parsed.Reason
 }
+
+func TestRefundBaseKeepsRemainderOnTheLastSlice(t *testing.T) {
+	soldQty := decimal.NewFromInt(3)
+	soldBase := decimal.NewFromInt(1)
+	first := refundBase(soldQty, soldBase, decimal.Zero, decimal.Zero, decimal.NewFromInt(1))
+	second := refundBase(soldQty, soldBase, decimal.NewFromInt(1), first, decimal.NewFromInt(1))
+	third := refundBase(soldQty, soldBase, decimal.NewFromInt(2), first.Add(second), decimal.NewFromInt(1))
+	if first.String() != "0.333333" || second.String() != "0.333333" || third.String() != "0.333334" {
+		t.Fatalf("slices %s %s %s", first, second, third)
+	}
+	if !first.Add(second).Add(third).Equal(soldBase) {
+		t.Fatalf("sum %s", first.Add(second).Add(third))
+	}
+}
+
+func TestConversionExplainedRequiresHistoricalProof(t *testing.T) {
+	qty := decimal.NewFromInt(2)
+	factor := decimal.NewFromInt(12)
+	density := decimal.RequireFromString("0.92")
+	base := decimal.RequireFromString("22.08")
+	if !conversionExplained(qty, base, &factor, &density) {
+		t.Fatal("litres to kilograms")
+	}
+	litres := decimal.NewFromInt(10)
+	if !conversionExplained(decimal.RequireFromString("9.2"), litres, factorPtr(1), &density) {
+		t.Fatal("kilograms to litres")
+	}
+	if !conversionExplained(decimal.NewFromInt(2), decimal.NewFromInt(48), factorPtr(24), nil) {
+		t.Fatal("same dimension")
+	}
+	if conversionExplained(qty, base, &factor, nil) {
+		t.Fatal("density was required")
+	}
+	if conversionExplained(qty, base, nil, &density) {
+		t.Fatal("factor was required")
+	}
+	wide := decimal.RequireFromString("1.0000004")
+	one := decimal.NewFromInt(1)
+	if !conversionExplained(wide, wide, &one, nil) {
+		t.Fatal("six decimal stock scale")
+	}
+}
+
+func factorPtr(value int64) *decimal.Decimal {
+	parsed := decimal.NewFromInt(value)
+	return &parsed
+}

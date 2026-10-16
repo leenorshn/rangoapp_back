@@ -94,6 +94,42 @@ func densityArg(value *decimal.Decimal) any {
 	return money.Num(*value)
 }
 
+func factorArg(value *decimal.Decimal) any {
+	if value == nil || !value.IsPositive() {
+		return nil
+	}
+	return money.Num(*value)
+}
+
+// refundBase restores a share of the sale's stored base quantity.
+// The last refund of the line receives the remainder, so successive partials sum to the original base.
+// Earlier refunds are rounded once, to six decimal places, half away from zero.
+func refundBase(soldQty, soldBase, prevQty, prevBase, qty decimal.Decimal) decimal.Decimal {
+	if prevQty.Add(qty).Equal(soldQty) {
+		return soldBase.Sub(prevBase)
+	}
+	return soldBase.Mul(qty).Div(soldQty).Round(6)
+}
+
+// conversionExplained reports whether the stored factor and density reproduce the base quantity.
+// A missing density is valid only when quantity × factor already equals the base.
+// Comparison uses the six-decimal scale stored on stock rows.
+// Neither value is taken from the product's current settings.
+func conversionExplained(qty, base decimal.Decimal, factor, density *decimal.Decimal) bool {
+	if factor == nil || !factor.IsPositive() || !qty.IsPositive() || !base.IsPositive() {
+		return false
+	}
+	stored := base.Round(6)
+	scaled := qty.Mul(*factor).Round(6)
+	if density == nil {
+		return scaled.Equal(stored)
+	}
+	if !density.IsPositive() {
+		return false
+	}
+	return scaled.Mul(*density).Round(6).Equal(stored) || scaled.Div(*density).Round(6).Equal(stored)
+}
+
 // soldQuantityAllowed checks the quantity of the chosen packaging.
 // Two cartons stay valid when the product forbids fractions of its base unit.
 // Only a fractional number of packages is rejected in that case.

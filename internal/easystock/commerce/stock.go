@@ -69,17 +69,6 @@ type PaySupplierInput struct {
 	CashSessionID *uuid.UUID
 }
 
-type InventoryCount struct {
-	ProductID uuid.UUID
-	Counted   decimal.Decimal
-	Reason    string
-}
-
-type CompleteInventoryInput struct {
-	StoreID uuid.UUID
-	Counts  []InventoryCount
-}
-
 func (s *Service) ReceiveStock(ctx context.Context, p tenant.Principal, in ReceiveStockInput) (ReceiveResult, error) {
 	var out ReceiveResult
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
@@ -157,10 +146,11 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 	purchaseID := uuid.New()
 	total := decimal.Zero
 	type line struct {
-		product, unit                 uuid.UUID
-		name                          string
-		qty, base, unitCost, lineCost decimal.Decimal
-		density                       *decimal.Decimal
+		product, unit      uuid.UUID
+		name               string
+		qty, base, factor  decimal.Decimal
+		unitCost, lineCost decimal.Decimal
+		density            *decimal.Decimal
 	}
 	lines := make([]line, 0, len(in.Lines))
 	for _, input := range in.Lines {
@@ -217,7 +207,7 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		unitCost := money.Round(input.UnitCost)
 		lineCost := money.Round(input.Quantity.Mul(unitCost))
 		total = total.Add(lineCost)
-		lines = append(lines, line{product: input.ProductID, unit: unitID, name: unitName, qty: input.Quantity, base: base, unitCost: unitCost, lineCost: lineCost, density: density})
+		lines = append(lines, line{product: input.ProductID, unit: unitID, name: unitName, qty: input.Quantity, base: base, factor: factorDec, unitCost: unitCost, lineCost: lineCost, density: density})
 	}
 	var supplier any
 	supplierText := ""
@@ -261,9 +251,9 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type, ref_type, ref_id, actor_user_id,
-				origin_unit_id, origin_unit_name, origin_quantity, density_kg_per_liter, origin_provenance
-			) VALUES ($1,$2,$3,$4,$5,'receive','purchase',$6,$7,$8,$9,$10,$11,'recorded')
-		`, uuid.New(), p.CompanyID, in.StoreID, line.product, money.Num(line.base), purchaseID, p.UserID, line.unit, line.name, money.Num(line.qty), densityArg(line.density)); err != nil {
+				origin_unit_id, origin_unit_name, origin_quantity, origin_factor, density_kg_per_liter, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'receive','purchase',$6,$7,$8,$9,$10,$11,$12,'recorded')
+		`, uuid.New(), p.CompanyID, in.StoreID, line.product, money.Num(line.base), purchaseID, p.UserID, line.unit, line.name, money.Num(line.qty), money.Num(line.factor), densityArg(line.density)); err != nil {
 			return ReceiveResult{}, err
 		}
 	}
@@ -433,75 +423,6 @@ func (s *Service) PaySupplier(ctx context.Context, p tenant.Principal, in PaySup
 			}
 		}
 		return audit(ctx, tx, p, &in.StoreID, "supplier.pay", "supplier_payment", id, map[string]string{"amount": amount.String()})
-	})
-	return id, err
-}
-
-func (s *Service) CompleteInventory(ctx context.Context, p tenant.Principal, in CompleteInventoryInput) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, &in.StoreID, access.StockAdjust); err != nil {
-			return err
-		}
-		if len(in.Counts) == 0 {
-			return domain.Invalid("inventory", "Indiquez les quantités comptées.")
-		}
-		id = uuid.New()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO inventory_sessions (id, company_id, store_id, status, created_by, completed_at)
-			VALUES ($1,$2,$3,'completed',$4,now())
-		`, id, p.CompanyID, in.StoreID, p.UserID); err != nil {
-			return err
-		}
-		for _, count := range in.Counts {
-			if count.Counted.IsNegative() {
-				return domain.Invalid("quantity", "La quantité comptée ne peut pas être négative.")
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO stock_balances (company_id, store_id, product_id, quantity, cost_complete)
-				VALUES ($1,$2,$3,0,false)
-				ON CONFLICT (company_id, store_id, product_id) DO NOTHING
-			`, p.CompanyID, in.StoreID, count.ProductID); err != nil {
-				return err
-			}
-			var current pgtype.Numeric
-			if err := tx.QueryRow(ctx, `
-				SELECT quantity FROM stock_balances WHERE store_id = $1 AND product_id = $2 FOR UPDATE
-			`, in.StoreID, count.ProductID).Scan(&current); err != nil {
-				return domain.NotFound("Article introuvable dans cette boutique.")
-			}
-			have, err := money.FromNum(current)
-			if err != nil {
-				return err
-			}
-			delta := count.Counted.Sub(have)
-			if !delta.IsZero() && count.Reason == "" {
-				return domain.Invalid("reason", "Indiquez le motif de l'écart d'inventaire.")
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO inventory_counts (id, company_id, inventory_id, product_id, counted_quantity, reason)
-				VALUES ($1,$2,$3,$4,$5,$6)
-			`, uuid.New(), p.CompanyID, id, count.ProductID, money.Num(count.Counted), blankNull(count.Reason)); err != nil {
-				return err
-			}
-			if delta.IsZero() {
-				continue
-			}
-			if _, err := tx.Exec(ctx, `
-				UPDATE stock_balances SET quantity = $4 WHERE company_id = $1 AND store_id = $2 AND product_id = $3
-			`, p.CompanyID, in.StoreID, count.ProductID, money.Num(count.Counted)); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO stock_movements (
-					id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id,
-					origin_provenance
-				) VALUES ($1,$2,$3,$4,$5,'adjustment',$6,'inventory',$7,$8,'legacy_unknown')
-			`, uuid.New(), p.CompanyID, in.StoreID, count.ProductID, money.Num(delta), count.Reason, id, p.UserID); err != nil {
-				return err
-			}
-		}
-		return audit(ctx, tx, p, &in.StoreID, "stock.adjust", "inventory", id, map[string]int{"lines": len(in.Counts)})
 	})
 	return id, err
 }
