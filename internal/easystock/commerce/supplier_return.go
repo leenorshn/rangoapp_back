@@ -157,7 +157,7 @@ func returnStockToSupplier(ctx context.Context, tx pgx.Tx, p tenant.Principal, i
 		`, uuid.New(), p.CompanyID, returnID, line.unit.productID, line.unit.id, money.Num(line.qty), money.Num(line.unit.factor), money.Num(line.base), exitValue, exitCurrency); err != nil {
 			return SupplierReturnResult{}, err
 		}
-		if err := postStockMovement(ctx, tx, p, in.StoreID, line.unit.productID, line.base.Neg(), "purchase_return", in.Reason, "stock_supplier_return", returnID, line.unit, line.qty, movementValue, currency); err != nil {
+		if err := postStockMovement(ctx, tx, p, in.StoreID, line.unit.productID, line.base.Neg(), "purchase_return", in.Reason, "stock_supplier_return", returnID, line.unit, line.qty, movementValue, currency, line.density); err != nil {
 			return SupplierReturnResult{}, err
 		}
 		resultLines = append(resultLines, SupplierReturnResultLine{
@@ -180,9 +180,10 @@ func returnStockToSupplier(ctx context.Context, tx pgx.Tx, p tenant.Principal, i
 }
 
 type preparedMove struct {
-	unit stockUnit
-	qty  decimal.Decimal
-	base decimal.Decimal
+	unit    stockUnit
+	qty     decimal.Decimal
+	base    decimal.Decimal
+	density *decimal.Decimal
 }
 
 func prepareStockLines(ctx context.Context, tx pgx.Tx, kind string, inputs []SupplierReturnLine) ([]preparedMove, map[uuid.UUID]decimal.Decimal, []uuid.UUID, error) {
@@ -212,8 +213,11 @@ func prepareStockLines(ctx context.Context, tx pgx.Tx, kind string, inputs []Sup
 		if err := soldQuantityAllowed(unit.fractional, input.Quantity); err != nil {
 			return nil, nil, nil, err
 		}
-		base := input.Quantity.Mul(unit.factor)
-		lines = append(lines, preparedMove{unit: unit, qty: input.Quantity, base: base})
+		base, density, err := unit.toBase(input.Quantity)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		lines = append(lines, preparedMove{unit: unit, qty: input.Quantity, base: base, density: density})
 		if _, ok := totals[input.ProductID]; !ok {
 			order = append(order, input.ProductID)
 		}

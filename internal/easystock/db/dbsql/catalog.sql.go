@@ -14,7 +14,9 @@ import (
 
 const listCatalogChanges = `-- name: ListCatalogChanges :many
 SELECT company_id, id, sku, name, description, category, category_id, barcode, base_unit,
-       allow_fractional, alert_threshold, status, sync_at AS updated_at, archived
+       allow_fractional, alert_threshold, status, sync_at AS updated_at, archived,
+       density_kg_per_liter, density_reference, density_updated_at, density_updated_by,
+       cross_dimension_conversion_enabled
 FROM (
   SELECT p.company_id, p.id, p.sku, p.name, p.description, p.category, p.category_id, p.barcode,
          p.base_unit, p.allow_fractional, p.alert_threshold, p.status,
@@ -30,7 +32,12 @@ FROM (
              ), p.updated_at)
            )
          END::timestamptz AS sync_at,
-         (p.archived_at IS NOT NULL)::bool AS archived
+         (p.archived_at IS NOT NULL)::bool AS archived,
+         p.density_kg_per_liter::text AS density_kg_per_liter,
+         p.density_reference,
+         p.density_updated_at,
+         p.density_updated_by,
+         p.cross_dimension_conversion_enabled
   FROM products p
 ) page
 WHERE (sync_at, id) > ($2::timestamptz, $3::uuid)
@@ -46,20 +53,25 @@ type ListCatalogChangesParams struct {
 }
 
 type ListCatalogChangesRow struct {
-	CompanyID       uuid.UUID
-	ID              uuid.UUID
-	Sku             string
-	Name            string
-	Description     *string
-	Category        *string
-	CategoryID      pgtype.UUID
-	Barcode         *string
-	BaseUnit        string
-	AllowFractional bool
-	AlertThreshold  string
-	Status          string
-	UpdatedAt       pgtype.Timestamptz
-	Archived        bool
+	CompanyID                       uuid.UUID
+	ID                              uuid.UUID
+	Sku                             string
+	Name                            string
+	Description                     *string
+	Category                        *string
+	CategoryID                      pgtype.UUID
+	Barcode                         *string
+	BaseUnit                        string
+	AllowFractional                 bool
+	AlertThreshold                  string
+	Status                          string
+	UpdatedAt                       pgtype.Timestamptz
+	Archived                        bool
+	DensityKgPerLiter               *string
+	DensityReference                *string
+	DensityUpdatedAt                pgtype.Timestamptz
+	DensityUpdatedBy                *uuid.UUID
+	CrossDimensionConversionEnabled bool
 }
 
 func (q *Queries) ListCatalogChanges(ctx context.Context, arg ListCatalogChangesParams) ([]ListCatalogChangesRow, error) {
@@ -91,6 +103,11 @@ func (q *Queries) ListCatalogChanges(ctx context.Context, arg ListCatalogChanges
 			&i.Status,
 			&i.UpdatedAt,
 			&i.Archived,
+			&i.DensityKgPerLiter,
+			&i.DensityReference,
+			&i.DensityUpdatedAt,
+			&i.DensityUpdatedBy,
+			&i.CrossDimensionConversionEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -153,7 +170,7 @@ func (q *Queries) ListPricesForStore(ctx context.Context, arg ListPricesForStore
 }
 
 const listUnitsForProducts = `-- name: ListUnitsForProducts :many
-SELECT id, product_id, name, factor, barcode, is_base, active,
+SELECT id, product_id, name, factor, dimension, barcode, is_base, active,
        allow_purchase, allow_sale, allow_fractional
 FROM product_units
 WHERE product_id = ANY($1::uuid[])
@@ -161,16 +178,17 @@ ORDER BY is_base DESC, name, id
 `
 
 type ListUnitsForProductsRow struct {
-	ID               uuid.UUID
-	ProductID        uuid.UUID
-	Name             string
-	Factor           string
-	Barcode          *string
-	IsBase           bool
-	Active           bool
-	AllowPurchase    bool
-	AllowSale        bool
-	AllowFractional  bool
+	ID              uuid.UUID
+	ProductID       uuid.UUID
+	Name            string
+	Factor          string
+	Dimension       string
+	Barcode         *string
+	IsBase          bool
+	Active          bool
+	AllowPurchase   bool
+	AllowSale       bool
+	AllowFractional bool
 }
 
 func (q *Queries) ListUnitsForProducts(ctx context.Context, productIds []uuid.UUID) ([]ListUnitsForProductsRow, error) {
@@ -187,6 +205,7 @@ func (q *Queries) ListUnitsForProducts(ctx context.Context, productIds []uuid.UU
 			&i.ProductID,
 			&i.Name,
 			&i.Factor,
+			&i.Dimension,
 			&i.Barcode,
 			&i.IsBase,
 			&i.Active,

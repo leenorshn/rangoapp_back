@@ -14,24 +14,29 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/shopspring/decimal"
 )
 
 // StockMovement is one audited quantity change, in the product base unit.
 type StockMovement struct {
-	ID             uuid.UUID
-	ProductID      uuid.UUID
-	SKU            string
-	ProductName    string
-	StoreID        uuid.UUID
-	Type           string
-	Quantity       string
-	OriginUnit     string
-	OriginQuantity string
-	RefType        string
-	RefID          uuid.UUID
-	ActorID        uuid.UUID
-	Reason         string
-	CreatedAt      time.Time
+	ID               uuid.UUID
+	ProductID        uuid.UUID
+	SKU              string
+	ProductName      string
+	StoreID          uuid.UUID
+	Type             string
+	Quantity         string
+	OriginUnit       string
+	OriginQuantity   string
+	OriginProvenance string
+	// DensityKgPerLiter is the density snapshotted on a kg/litre conversion.
+	// Empty means the movement stayed in one dimension. It is not a purchase cost.
+	DensityKgPerLiter string
+	RefType           string
+	RefID             uuid.UUID
+	ActorID           uuid.UUID
+	Reason            string
+	CreatedAt         time.Time
 }
 
 // MovementQuery pages the journal of one store.
@@ -39,6 +44,9 @@ type MovementQuery struct {
 	StoreID   uuid.UUID
 	ProductID uuid.UUID
 	Type      string
+	ActorID   uuid.UUID
+	From      time.Time
+	To        time.Time
 	Page      Page
 }
 
@@ -73,6 +81,9 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 	if err != nil {
 		return nil, err
 	}
+	if !q.From.IsZero() && !q.To.IsZero() && q.From.After(q.To) {
+		return nil, domain.Invalid("period", "La période commence après sa fin.")
+	}
 	var out []StockMovement
 	err = s.with(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := authorizeAny(ctx, tx, p, &q.StoreID, access.StockMovementsRead, access.StockRead, access.ReportsRead, access.SalesCreate, access.StockReceive, access.StockAdjust); err != nil {
@@ -83,17 +94,21 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT m.id, m.product_id, p.sku, p.name, m.store_id, m.movement_type, m.quantity_delta,
-			       m.origin_unit_name, m.origin_quantity, m.ref_type, m.ref_id, m.actor_user_id,
+			       m.origin_unit_name, m.origin_quantity, m.origin_provenance, m.density_kg_per_liter::text,
+			       m.ref_type, m.ref_id, m.actor_user_id,
 			       COALESCE(m.reason, m.note, ''), m.created_at
 			FROM stock_movements m
 			JOIN products p ON p.id = m.product_id
 			WHERE m.store_id = $1
 			  AND ($2::uuid = '00000000-0000-0000-0000-000000000000' OR m.product_id = $2)
 			  AND ($3::boolean = false OR m.movement_type = ANY($4::text[]))
-			  AND ($5::boolean = false OR (m.created_at, m.id) < ($6, $7))
+			  AND ($5::uuid = '00000000-0000-0000-0000-000000000000' OR m.actor_user_id = $5)
+			  AND ($6::boolean = false OR m.created_at >= $7)
+			  AND ($8::boolean = false OR m.created_at <= $9)
+			  AND ($10::boolean = false OR (m.created_at, m.id) < ($11, $12))
 			ORDER BY m.created_at DESC, m.id DESC
-			LIMIT $8
-		`, q.StoreID, q.ProductID, len(types) > 0, types, page.AfterID != uuid.Nil, page.After, page.AfterID, page.Limit)
+			LIMIT $13
+		`, q.StoreID, q.ProductID, len(types) > 0, types, q.ActorID, !q.From.IsZero(), q.From, !q.To.IsZero(), q.To, page.AfterID != uuid.Nil, page.After, page.AfterID, page.Limit)
 		if err != nil {
 			return err
 		}
@@ -102,11 +117,11 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 			var item StockMovement
 			var delta pgtype.Numeric
 			var originQty pgtype.Numeric
-			var origin, refType *string
+			var origin, provenance, density, refType *string
 			var refID, actor *uuid.UUID
 			if err := rows.Scan(
 				&item.ID, &item.ProductID, &item.SKU, &item.ProductName, &item.StoreID, &item.Type, &delta,
-				&origin, &originQty, &refType, &refID, &actor, &item.Reason, &item.CreatedAt,
+				&origin, &originQty, &provenance, &density, &refType, &refID, &actor, &item.Reason, &item.CreatedAt,
 			); err != nil {
 				return err
 			}
@@ -125,6 +140,17 @@ func (s *Service) StockMovements(ctx context.Context, p tenant.Principal, q Move
 					return err
 				}
 				item.OriginQuantity = parsed.String()
+			}
+			item.OriginProvenance = "legacy_unknown"
+			if provenance != nil && *provenance != "" {
+				item.OriginProvenance = *provenance
+			}
+			if density != nil && strings.TrimSpace(*density) != "" {
+				parsed, err := decimal.NewFromString(*density)
+				if err != nil {
+					return err
+				}
+				item.DensityKgPerLiter = parsed.String()
 			}
 			if refType != nil {
 				item.RefType = *refType
@@ -281,28 +307,20 @@ func summaryStores(ctx context.Context, tx pgx.Tx, p tenant.Principal, storeID u
 }
 
 func costAllowed(ctx context.Context, tx pgx.Tx, p tenant.Principal, storeID uuid.UUID) (bool, error) {
-	var scope *uuid.UUID
-	if storeID != uuid.Nil {
-		scope = &storeID
-	}
-	_, err := access.AuthorizeRead(ctx, tx, p.CompanyID, p.UserID, scope, access.StockValuationRead)
-	if err == nil {
-		return true, nil
-	}
-	if de, ok := domain.As(err); ok && (de.Code == domain.CodePermissionDenied || de.Code == domain.CodeFailedPrecondition) {
-		_, marginErr := access.AuthorizeRead(ctx, tx, p.CompanyID, p.UserID, scope, access.MarginsRead)
-		if marginErr == nil {
-			return true, nil
-		}
-		if de, ok := domain.As(marginErr); ok && (de.Code == domain.CodePermissionDenied || de.Code == domain.CodeFailedPrecondition) {
-			return false, nil
-		}
-		return false, marginErr
-	}
-	return false, err
+	return access.CanReadCost(ctx, tx, p.CompanyID, p.UserID, storeID)
 }
 
 func costValues(ctx context.Context, tx pgx.Tx, stores []uuid.UUID) ([]MoneyTotal, int, error) {
+	totals := map[string]decimal.Decimal{}
+	add := func(currency string, amount pgtype.Numeric) error {
+		value, err := money.FromNum(amount)
+		if err != nil {
+			return err
+		}
+		code := strings.TrimSpace(currency)
+		totals[code] = totals[code].Add(value)
+		return nil
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT b.cost_currency, SUM(b.quantity * b.avg_cost)
 		FROM stock_balances b
@@ -318,35 +336,72 @@ func costValues(ctx context.Context, tx pgx.Tx, stores []uuid.UUID) ([]MoneyTota
 		return nil, 0, err
 	}
 	defer rows.Close()
-	totals := make([]MoneyTotal, 0)
 	for rows.Next() {
 		var currency string
 		var amount pgtype.Numeric
 		if err := rows.Scan(&currency, &amount); err != nil {
 			return nil, 0, err
 		}
-		value, err := money.FromNum(amount)
-		if err != nil {
+		if err := add(currency, amount); err != nil {
 			return nil, 0, err
 		}
-		totals = append(totals, MoneyTotal{Currency: strings.TrimSpace(currency), Amount: money.Round(value).String()})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
+	transit, err := tx.Query(ctx, `
+		SELECT l.exit_currency, SUM(l.exit_value)
+		FROM stock_transfer_lines l
+		JOIN stock_transfers t ON t.id = l.transfer_id AND t.company_id = l.company_id
+		WHERE t.status = 'in_transit'
+		  AND t.source_store_id = ANY($1::uuid[])
+		  AND l.exit_value IS NOT NULL
+		  AND l.exit_currency IS NOT NULL
+		GROUP BY l.exit_currency
+	`, stores)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer transit.Close()
+	for transit.Next() {
+		var currency string
+		var amount pgtype.Numeric
+		if err := transit.Scan(&currency, &amount); err != nil {
+			return nil, 0, err
+		}
+		if err := add(currency, amount); err != nil {
+			return nil, 0, err
+		}
+	}
+	if err := transit.Err(); err != nil {
+		return nil, 0, err
+	}
+	out := make([]MoneyTotal, 0, len(totals))
+	for currency, amount := range totals {
+		out = append(out, MoneyTotal{Currency: currency, Amount: money.Round(amount).String()})
+	}
 	var incomplete int
 	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(DISTINCT b.product_id)
-		FROM stock_balances b
-		JOIN products p ON p.id = b.product_id AND p.status = 'active'
-		WHERE b.store_id = ANY($1::uuid[])
-		  AND b.quantity > 0
-		  AND NOT (b.cost_complete AND b.avg_cost IS NOT NULL AND b.cost_currency IS NOT NULL)
+		SELECT COUNT(*) FROM (
+			SELECT b.product_id
+			FROM stock_balances b
+			JOIN products p ON p.id = b.product_id AND p.status = 'active'
+			WHERE b.store_id = ANY($1::uuid[])
+			  AND b.quantity > 0
+			  AND NOT (b.cost_complete AND b.avg_cost IS NOT NULL AND b.cost_currency IS NOT NULL)
+			UNION
+			SELECT l.product_id
+			FROM stock_transfer_lines l
+			JOIN stock_transfers t ON t.id = l.transfer_id AND t.company_id = l.company_id
+			WHERE t.status = 'in_transit'
+			  AND t.source_store_id = ANY($1::uuid[])
+			  AND (l.exit_value IS NULL OR l.exit_currency IS NULL)
+		) missing
 	`, stores).Scan(&incomplete); err != nil {
 		return nil, 0, err
 	}
-	sortMoney(totals)
-	return totals, incomplete, nil
+	sortMoney(out)
+	return out, incomplete, nil
 }
 
 func retailValues(ctx context.Context, tx pgx.Tx, stores []uuid.UUID) ([]MoneyTotal, int, error) {

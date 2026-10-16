@@ -221,8 +221,8 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id,
-				origin_unit_id, origin_unit_name, origin_quantity
-			) VALUES ($1,$2,$3,$4,$5,'refund',$6,'refund',$7,$8,$9,$10,$11)
+				origin_unit_id, origin_unit_name, origin_quantity, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'refund',$6,'refund',$7,$8,$9,$10,$11,'recorded')
 		`, uuid.New(), p.CompanyID, storeID, line.product, money.Num(line.base), in.Reason, refundID, p.UserID, line.unit, line.unitName, money.Num(line.qty)); err != nil {
 			return RefundResult{}, err
 		}

@@ -25,22 +25,31 @@ type Product struct {
 	Archived        bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	Units           []Unit
-	MatchedUnitID   uuid.UUID
-	ImageMediaID    uuid.UUID
+	// DensityKgPerLiter is empty until a positive density is stored.
+	// Cross-dimension conversion stays off until CrossDimensionEnabled is true.
+	DensityKgPerLiter     string
+	DensityReference      string
+	DensityUpdatedAt      *time.Time
+	DensityUpdatedBy      uuid.UUID
+	CrossDimensionEnabled bool
+	Units                 []Unit
+	MatchedUnitID         uuid.UUID
+	ImageMediaID          uuid.UUID
 	// StockKnown is true when the list was loaded for one store.
 	StockKnown        bool
 	AvailableQuantity string
 	Availability      string
 }
 
-// Unit is one packaging. Factor is how many base units it contains.
+// Unit is one packaging. Factor is how many base units it contains when the
+// dimension matches the base unit. Mass and volume use the product density instead.
 // Purchase and sale rights are independent. Stock is never stored per packaging.
 type Unit struct {
 	ID              uuid.UUID
 	ProductID       uuid.UUID
 	Name            string
 	Factor          string
+	Dimension       string
 	Barcode         string
 	IsBase          bool
 	Active          bool
@@ -82,6 +91,7 @@ type CreateInput struct {
 	CategoryName    string
 	Barcode         string
 	BaseUnit        string
+	BaseDimension   string
 	AllowFractional bool
 	AlertThreshold  decimal.Decimal
 	StoreID         uuid.UUID
@@ -117,6 +127,19 @@ type UnitInput struct {
 	AllowPurchase   *bool
 	AllowSale       *bool
 	AllowFractional *bool
+	Dimension       string
+	HasDimension    bool
+}
+
+// DensityInput stores an optional kg-per-litre density. The conversion stays
+// off until Enabled is true, and a positive density is required to turn it on.
+type DensityInput struct {
+	ProductID    uuid.UUID
+	Density      decimal.Decimal
+	HasDensity   bool
+	Reference    string
+	HasReference bool
+	Enabled      bool
 }
 
 // PriceInput upserts one server price. A nil amount means the currency was left blank.

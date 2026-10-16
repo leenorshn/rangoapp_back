@@ -285,20 +285,22 @@ func stockAPI(deps Deps, moneyAmount *graphql.Object) (graphql.Fields, graphql.F
 	movement := graphql.NewObject(graphql.ObjectConfig{
 		Name: "StockMovement",
 		Fields: graphql.Fields{
-			"id":             &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"productId":      &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"sku":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"productName":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"storeId":        &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"type":           &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"quantity":       &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"originUnit":     &graphql.Field{Type: graphql.String},
-			"originQuantity": &graphql.Field{Type: graphql.String},
-			"refType":        &graphql.Field{Type: graphql.String},
-			"refId":          &graphql.Field{Type: graphql.ID},
-			"actorId":        &graphql.Field{Type: graphql.ID},
-			"reason":         &graphql.Field{Type: graphql.String},
-			"createdAt":      &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"id":                &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"productId":         &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"sku":               &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"productName":       &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"storeId":           &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"type":              &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"quantity":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"originUnit":        &graphql.Field{Type: graphql.String},
+			"originQuantity":    &graphql.Field{Type: graphql.String},
+			"originProvenance":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"densityKgPerLiter": &graphql.Field{Type: graphql.String},
+			"refType":           &graphql.Field{Type: graphql.String},
+			"refId":             &graphql.Field{Type: graphql.ID},
+			"actorId":           &graphql.Field{Type: graphql.ID},
+			"reason":            &graphql.Field{Type: graphql.String},
+			"createdAt":         &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
 		},
 	})
 	summary := graphql.NewObject(graphql.ObjectConfig{
@@ -372,6 +374,9 @@ func stockAPI(deps Deps, moneyAmount *graphql.Object) (graphql.Fields, graphql.F
 				"storeId":   &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.ID)},
 				"productId": &graphql.ArgumentConfig{Type: graphql.ID},
 				"type":      &graphql.ArgumentConfig{Type: graphql.String},
+				"actorId":   &graphql.ArgumentConfig{Type: graphql.ID},
+				"from":      &graphql.ArgumentConfig{Type: graphql.DateTime},
+				"to":        &graphql.ArgumentConfig{Type: graphql.DateTime},
 				"after":     &graphql.ArgumentConfig{Type: graphql.DateTime},
 				"afterId":   &graphql.ArgumentConfig{Type: graphql.ID},
 				"limit":     &graphql.ArgumentConfig{Type: graphql.Int},
@@ -385,8 +390,21 @@ func stockAPI(deps Deps, moneyAmount *graphql.Object) (graphql.Fields, graphql.F
 				if err != nil {
 					return nil, err
 				}
+				actorID, err := argUUID(p.Args["actorId"])
+				if err != nil {
+					return nil, err
+				}
+				from, err := optionalTime(p.Args["from"])
+				if err != nil {
+					return nil, err
+				}
+				to, err := optionalTime(p.Args["to"])
+				if err != nil {
+					return nil, err
+				}
 				rows, err := deps.Reads.StockMovements(p.Context, member, readmodel.MovementQuery{
-					StoreID: storeID, ProductID: productID, Type: str(p.Args["type"]), Page: page,
+					StoreID: storeID, ProductID: productID, Type: str(p.Args["type"]),
+					ActorID: actorID, From: from, To: to, Page: page,
 				})
 				if err != nil {
 					return nil, err
@@ -1106,6 +1124,7 @@ func movementResultJSON(row commerce.StockMovementResult) map[string]any {
 	if row.OriginQuantity != "" {
 		item["originQuantity"] = row.OriginQuantity
 	}
+	item["originProvenance"] = provenanceOr(row.OriginProvenance, row.OriginUnit)
 	if row.RefType != "" {
 		item["refType"] = row.RefType
 	}
@@ -1134,6 +1153,10 @@ func movementsJSON(rows []readmodel.StockMovement) []any {
 		}
 		if row.OriginQuantity != "" {
 			item["originQuantity"] = row.OriginQuantity
+		}
+		item["originProvenance"] = provenanceOr(row.OriginProvenance, row.OriginUnit)
+		if row.DensityKgPerLiter != "" {
+			item["densityKgPerLiter"] = row.DensityKgPerLiter
 		}
 		if row.RefType != "" {
 			item["refType"] = row.RefType

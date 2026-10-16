@@ -272,7 +272,7 @@ func dispatchStockTransfer(ctx context.Context, tx pgx.Tx, p tenant.Principal, i
 		if tag.RowsAffected() != 1 {
 			return TransferResult{}, domain.NotFound("Ligne de transfert introuvable.")
 		}
-		if err := postStockMovement(ctx, tx, p, head.source, line.unit.productID, line.base.Neg(), "transfer_out", "", "stock_transfer", id, line.unit, line.qty, movementValue, currency); err != nil {
+		if err := postStockMovement(ctx, tx, p, head.source, line.unit.productID, line.base.Neg(), "transfer_out", "", "stock_transfer", id, line.unit, line.qty, movementValue, currency, line.density); err != nil {
 			return TransferResult{}, err
 		}
 	}
@@ -328,7 +328,7 @@ func receiveStockTransfer(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 			value := money.Round(line.base.Mul(cost))
 			movementValue = &value
 		}
-		if err := postStockMovement(ctx, tx, p, head.destination, line.unit.productID, line.base, "transfer_in", "", "stock_transfer", id, line.unit, line.qty, movementValue, currency); err != nil {
+		if err := postStockMovement(ctx, tx, p, head.destination, line.unit.productID, line.base, "transfer_in", "", "stock_transfer", id, line.unit, line.qty, movementValue, currency, line.density); err != nil {
 			return TransferResult{}, err
 		}
 	}
@@ -381,7 +381,7 @@ func cancelStockTransfer(ctx context.Context, tx pgx.Tx, p tenant.Principal, id 
 				value := money.Round(line.base.Mul(cost))
 				movementValue = &value
 			}
-			if err := postStockMovement(ctx, tx, p, head.source, line.unit.productID, line.base, "transfer_in", "returned_to_source", "stock_transfer", id, line.unit, line.qty, movementValue, currency); err != nil {
+			if err := postStockMovement(ctx, tx, p, head.source, line.unit.productID, line.base, "transfer_in", "returned_to_source", "stock_transfer", id, line.unit, line.qty, movementValue, currency, line.density); err != nil {
 				return TransferResult{}, err
 			}
 		}

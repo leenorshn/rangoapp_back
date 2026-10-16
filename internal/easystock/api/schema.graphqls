@@ -17,7 +17,7 @@ type Query {
   stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
   stockInventory(id: ID!): StockInventory!
   stockTransfer(id: ID!): StockTransfer!
-  stockMovements(storeId: ID!, productId: ID, type: String, after: DateTime, afterId: ID, limit: Int): [StockMovement!]!
+  stockMovements(storeId: ID!, productId: ID, type: String, actorId: ID, from: DateTime, to: DateTime, after: DateTime, afterId: ID, limit: Int): [StockMovement!]!
   stockSummary(storeId: ID): StockSummary!
   cash(storeId: ID!): [CashRegister!]!
   cashSession(id: ID!): CashSession!
@@ -59,6 +59,7 @@ type Mutation {
   archiveProductUnit(id: ID!): ProductUnit!
   upsertProductPrice(input: ProductPriceInput!): ProductPrice!
   archiveProductPrice(id: ID!): Boolean!
+  setProductDensity(input: SetProductDensityInput!): Product!
   createCompany(input: CreateCompanyInput!): CompanyCreated!
   createStore(input: CreateStoreInput!): Store!
   inviteMember(input: InviteMemberInput!): Invitation!
@@ -111,6 +112,11 @@ type CatalogChange {
   status: String!
   updatedAt: DateTime!
   archived: Boolean!
+  densityKgPerLiter: String
+  densityReference: String
+  densityUpdatedAt: DateTime
+  densityUpdatedBy: ID
+  crossDimensionConversionEnabled: Boolean!
   units: [ProductUnit!]!
 }
 
@@ -128,6 +134,12 @@ type Product {
   alertThreshold: String!
   status: String!
   archived: Boolean!
+  # Densité kg/litre, désactivée tant que crossDimensionConversionEnabled est faux.
+  densityKgPerLiter: String
+  densityReference: String
+  densityUpdatedAt: DateTime
+  densityUpdatedBy: ID
+  crossDimensionConversionEnabled: Boolean!
   createdAt: DateTime!
   updatedAt: DateTime!
   units: [ProductUnit!]!
@@ -151,6 +163,8 @@ type ProductUnit {
   productId: ID!
   name: String!
   factor: String!
+  # count, mass ou volume. count par défaut. Le stock reste dans l'unité de base.
+  dimension: String!
   barcode: String
   isBase: Boolean!
   active: Boolean!
@@ -183,6 +197,8 @@ input ProductInput {
   categoryName: String
   barcode: String
   baseUnit: String
+  # count, mass ou volume. Vide signifie count.
+  baseDimension: String
   allowFractional: Boolean
   alertThreshold: String
   storeId: ID
@@ -193,10 +209,18 @@ input ProductInput {
 input ProductUnitInput {
   name: String!
   factor: String!
+  dimension: String
   barcode: String
   allowPurchase: Boolean
   allowSale: Boolean
   allowFractional: Boolean
+}
+
+input SetProductDensityInput {
+  productId: ID!
+  densityKgPerLiter: String
+  densityReference: String
+  enabled: Boolean!
 }
 
 input ProductPriceInput {
@@ -541,6 +565,9 @@ type StockMovement {
   quantity: String!
   originUnit: String
   originQuantity: String
+  originProvenance: String!
+  # Densité utilisée pour cette conversion kg/litre. Absente si le mouvement est resté dans la même dimension. Ce n'est pas un coût.
+  densityKgPerLiter: String
   refType: String
   refId: ID
   actorId: ID

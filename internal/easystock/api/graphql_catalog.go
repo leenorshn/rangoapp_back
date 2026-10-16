@@ -36,6 +36,7 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			"productId":       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
 			"name":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"factor":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"dimension":       &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"barcode":         &graphql.Field{Type: graphql.String},
 			"isBase":          &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
 			"active":          &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
@@ -56,26 +57,31 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 	product := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Product",
 		Fields: graphql.Fields{
-			"id":                &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"companyId":         &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"sku":               &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"name":              &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"description":       &graphql.Field{Type: graphql.String},
-			"category":          &graphql.Field{Type: category},
-			"categoryName":      &graphql.Field{Type: graphql.String},
-			"barcode":           &graphql.Field{Type: graphql.String},
-			"baseUnit":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"allowFractional":   &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"alertThreshold":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"status":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"archived":          &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"createdAt":         &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"updatedAt":         &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"units":             &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(unit)))},
-			"matchedUnitId":     &graphql.Field{Type: graphql.ID},
-			"imageMediaId":      &graphql.Field{Type: graphql.ID},
-			"availableQuantity": &graphql.Field{Type: graphql.String},
-			"availability":      &graphql.Field{Type: graphql.String},
+			"id":                              &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"companyId":                       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"sku":                             &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"name":                            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"description":                     &graphql.Field{Type: graphql.String},
+			"category":                        &graphql.Field{Type: category},
+			"categoryName":                    &graphql.Field{Type: graphql.String},
+			"barcode":                         &graphql.Field{Type: graphql.String},
+			"baseUnit":                        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"allowFractional":                 &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"alertThreshold":                  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"status":                          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"archived":                        &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"densityKgPerLiter":               &graphql.Field{Type: graphql.String},
+			"densityReference":                &graphql.Field{Type: graphql.String},
+			"densityUpdatedAt":                &graphql.Field{Type: graphql.DateTime},
+			"densityUpdatedBy":                &graphql.Field{Type: graphql.ID},
+			"crossDimensionConversionEnabled": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"createdAt":                       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"updatedAt":                       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"units":                           &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(unit)))},
+			"matchedUnitId":                   &graphql.Field{Type: graphql.ID},
+			"imageMediaId":                    &graphql.Field{Type: graphql.ID},
+			"availableQuantity":               &graphql.Field{Type: graphql.String},
+			"availability":                    &graphql.Field{Type: graphql.String},
 			"cost": &graphql.Field{
 				Type: cost,
 				Resolve: func(p graphql.ResolveParams) (any, error) {
@@ -87,20 +93,25 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 	change := graphql.NewObject(graphql.ObjectConfig{
 		Name: "CatalogChange",
 		Fields: graphql.Fields{
-			"id":              &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"sku":             &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"name":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"description":     &graphql.Field{Type: graphql.String},
-			"category":        &graphql.Field{Type: category},
-			"categoryName":    &graphql.Field{Type: graphql.String},
-			"barcode":         &graphql.Field{Type: graphql.String},
-			"baseUnit":        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"allowFractional": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"alertThreshold":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"status":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"updatedAt":       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"archived":        &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"units":           &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(unit)))},
+			"id":                              &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"sku":                             &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"name":                            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"description":                     &graphql.Field{Type: graphql.String},
+			"category":                        &graphql.Field{Type: category},
+			"categoryName":                    &graphql.Field{Type: graphql.String},
+			"barcode":                         &graphql.Field{Type: graphql.String},
+			"baseUnit":                        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"allowFractional":                 &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"alertThreshold":                  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"status":                          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"updatedAt":                       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"archived":                        &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"densityKgPerLiter":               &graphql.Field{Type: graphql.String},
+			"densityReference":                &graphql.Field{Type: graphql.String},
+			"densityUpdatedAt":                &graphql.Field{Type: graphql.DateTime},
+			"densityUpdatedBy":                &graphql.Field{Type: graphql.ID},
+			"crossDimensionConversionEnabled": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"units":                           &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(unit)))},
 		},
 	})
 	unitInput := graphql.NewInputObject(graphql.InputObjectConfig{
@@ -108,6 +119,7 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 		Fields: graphql.InputObjectConfigFieldMap{
 			"name":            &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
 			"factor":          &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"dimension":       &graphql.InputObjectFieldConfig{Type: graphql.String},
 			"barcode":         &graphql.InputObjectFieldConfig{Type: graphql.String},
 			"allowPurchase":   &graphql.InputObjectFieldConfig{Type: graphql.Boolean},
 			"allowSale":       &graphql.InputObjectFieldConfig{Type: graphql.Boolean},
@@ -125,6 +137,15 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			"unitPrice":     &graphql.InputObjectFieldConfig{Type: graphql.String},
 		},
 	})
+	densityInput := graphql.NewInputObject(graphql.InputObjectConfig{
+		Name: "SetProductDensityInput",
+		Fields: graphql.InputObjectConfigFieldMap{
+			"productId":         &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.ID)},
+			"densityKgPerLiter": &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"densityReference":  &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"enabled":           &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.Boolean)},
+		},
+	})
 	productInput := graphql.NewInputObject(graphql.InputObjectConfig{
 		Name: "ProductInput",
 		Fields: graphql.InputObjectConfigFieldMap{
@@ -135,6 +156,7 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			"categoryName":    &graphql.InputObjectFieldConfig{Type: graphql.String},
 			"barcode":         &graphql.InputObjectFieldConfig{Type: graphql.String},
 			"baseUnit":        &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"baseDimension":   &graphql.InputObjectFieldConfig{Type: graphql.String},
 			"allowFractional": &graphql.InputObjectFieldConfig{Type: graphql.Boolean},
 			"alertThreshold":  &graphql.InputObjectFieldConfig{Type: graphql.String},
 			"storeId":         &graphql.InputObjectFieldConfig{Type: graphql.ID},
@@ -496,6 +518,46 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 				return true, nil
 			},
 		},
+		"setProductDensity": &graphql.Field{
+			Type: graphql.NewNonNull(product),
+			Args: graphql.FieldConfigArgument{"input": &graphql.ArgumentConfig{Type: graphql.NewNonNull(densityInput)}},
+			Resolve: func(p graphql.ResolveParams) (any, error) {
+				member, err := requireCompany(p.Context)
+				if err != nil {
+					return nil, err
+				}
+				if deps.Commerce == nil {
+					return nil, errUnavailable("Catalogue indisponible.")
+				}
+				input, _ := p.Args["input"].(map[string]any)
+				if input == nil {
+					return nil, errUnavailable("Densité illisible.")
+				}
+				productID, err := argUUID(input["productId"])
+				if err != nil || productID == uuid.Nil {
+					return nil, errUnavailable("Identifiant invalide.")
+				}
+				in := catalog.DensityInput{ProductID: productID, Enabled: input["enabled"] == true}
+				if _, ok := input["densityKgPerLiter"]; ok {
+					text := strings.TrimSpace(str(input["densityKgPerLiter"]))
+					parsed, err := decimal.NewFromString(text)
+					if err != nil || text == "" {
+						return nil, errUnavailable("La densité est illisible.")
+					}
+					in.Density = parsed
+					in.HasDensity = true
+				}
+				if _, ok := input["densityReference"]; ok {
+					in.Reference = str(input["densityReference"])
+					in.HasReference = true
+				}
+				row, err := deps.Commerce.SetProductDensity(p.Context, member, in)
+				if err != nil {
+					return nil, err
+				}
+				return productJSON(row, uuid.Nil), nil
+			},
+		},
 	}
 	return queries, mutations
 }
@@ -544,8 +606,9 @@ func productJSON(row catalog.Product, storeID uuid.UUID) map[string]any {
 		"id": row.ID.String(), "companyId": row.CompanyID.String(), "sku": row.SKU, "name": row.Name,
 		"baseUnit": row.BaseUnit, "allowFractional": row.AllowFractional, "alertThreshold": row.AlertThreshold,
 		"status": row.Status, "archived": row.Archived, "createdAt": row.CreatedAt, "updatedAt": row.UpdatedAt,
-		"units": unitsJSON(row.Units),
+		"crossDimensionConversionEnabled": row.CrossDimensionEnabled, "units": unitsJSON(row.Units),
 	}
+	putDensity(row, out)
 	if row.Description != "" {
 		out["description"] = row.Description
 	}
@@ -579,8 +642,9 @@ func changeJSON(row catalog.Product) map[string]any {
 		"id": row.ID.String(), "sku": row.SKU, "name": row.Name, "baseUnit": row.BaseUnit,
 		"allowFractional": row.AllowFractional, "alertThreshold": row.AlertThreshold,
 		"status": row.Status, "archived": row.Archived, "updatedAt": row.UpdatedAt,
-		"units": unitsJSON(row.Units),
+		"crossDimensionConversionEnabled": row.CrossDimensionEnabled, "units": unitsJSON(row.Units),
 	}
+	putDensity(row, out)
 	if row.Description != "" {
 		out["description"] = row.Description
 	}
@@ -596,6 +660,28 @@ func changeJSON(row catalog.Product) map[string]any {
 	return out
 }
 
+func putDensity(row catalog.Product, out map[string]any) {
+	if row.DensityKgPerLiter != "" {
+		out["densityKgPerLiter"] = row.DensityKgPerLiter
+	}
+	if row.DensityReference != "" {
+		out["densityReference"] = row.DensityReference
+	}
+	if row.DensityUpdatedAt != nil {
+		out["densityUpdatedAt"] = *row.DensityUpdatedAt
+	}
+	if row.DensityUpdatedBy != uuid.Nil {
+		out["densityUpdatedBy"] = row.DensityUpdatedBy.String()
+	}
+}
+
+func unitDimension(value string) string {
+	if value == "" {
+		return "count"
+	}
+	return value
+}
+
 func unitsJSON(units []catalog.Unit) []any {
 	out := make([]any, 0, len(units))
 	for _, unit := range units {
@@ -607,7 +693,7 @@ func unitsJSON(units []catalog.Unit) []any {
 func unitJSON(unit catalog.Unit) map[string]any {
 	out := map[string]any{
 		"id": unit.ID.String(), "productId": unit.ProductID.String(), "name": unit.Name,
-		"factor": unit.Factor, "isBase": unit.IsBase, "active": unit.Active,
+		"factor": unit.Factor, "dimension": unitDimension(unit.Dimension), "isBase": unit.IsBase, "active": unit.Active,
 		"allowPurchase": unit.AllowPurchase, "allowSale": unit.AllowSale, "allowFractional": unit.AllowFractional,
 		"prices": pricesJSON(unit.Prices),
 	}
@@ -664,7 +750,7 @@ func createInput(raw any) (catalog.CreateInput, uuid.UUID, error) {
 	return catalog.CreateInput{
 		SKU: str(input["sku"]), Name: str(input["name"]), Description: str(input["description"]),
 		CategoryID: categoryID, CategoryName: str(input["categoryName"]), Barcode: str(input["barcode"]),
-		BaseUnit: str(input["baseUnit"]), AllowFractional: allow, AlertThreshold: alert,
+		BaseUnit: str(input["baseUnit"]), BaseDimension: str(input["baseDimension"]), AllowFractional: allow, AlertThreshold: alert,
 		StoreID: storeID, Units: units, Prices: prices,
 	}, storeID, nil
 }
@@ -790,6 +876,10 @@ func unitInputs(raw any) ([]catalog.UnitInput, error) {
 		if _, ok := row["allowFractional"]; ok {
 			value, _ := row["allowFractional"].(bool)
 			item.AllowFractional = &value
+		}
+		if _, ok := row["dimension"]; ok {
+			item.Dimension = str(row["dimension"])
+			item.HasDimension = true
 		}
 		out = append(out, item)
 	}

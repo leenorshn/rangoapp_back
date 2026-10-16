@@ -92,7 +92,7 @@ func (s *Service) StartStockInventory(ctx context.Context, p tenant.Principal, i
 			return err
 		}
 		var err error
-		out, err = assembleInventory(ctx, tx, id)
+		out, err = assembleInventory(ctx, tx, p, id)
 		return err
 	})
 	return out, err
@@ -127,11 +127,11 @@ func (s *Service) RecordInventoryCount(ctx context.Context, p tenant.Principal, 
 		}
 		var factor pgtype.Numeric
 		var active, unitFractional bool
-		var unitName string
+		var unitName, dimension string
 		err = tx.QueryRow(ctx, `
-			SELECT name, factor, active, allow_fractional
+			SELECT name, factor, active, allow_fractional, dimension
 			FROM product_units WHERE id = $1 AND product_id = $2
-		`, in.ProductUnitID, in.ProductID).Scan(&unitName, &factor, &active, &unitFractional)
+		`, in.ProductUnitID, in.ProductID).Scan(&unitName, &factor, &active, &unitFractional, &dimension)
 		if err != nil {
 			return domain.NotFound("Conditionnement introuvable.")
 		}
@@ -145,7 +145,14 @@ func (s *Service) RecordInventoryCount(ctx context.Context, p tenant.Principal, 
 		if err != nil {
 			return err
 		}
-		base := in.CountedQuantity.Mul(factorDec)
+		conv, err := loadConversion(ctx, tx, in.ProductID)
+		if err != nil {
+			return err
+		}
+		base, _, err := convertQuantity(in.CountedQuantity, factorDec, dimension, conv)
+		if err != nil {
+			return err
+		}
 		var qty pgtype.Numeric
 		err = tx.QueryRow(ctx, `
 			SELECT quantity FROM stock_balances WHERE store_id = $1 AND product_id = $2
@@ -184,7 +191,7 @@ func (s *Service) RecordInventoryCount(ctx context.Context, p tenant.Principal, 
 		if err := audit(ctx, tx, p, &session.storeID, "stock.inventory.count", "inventory", in.InventoryID, map[string]string{"productId": in.ProductID.String()}); err != nil {
 			return err
 		}
-		view, err := assembleInventory(ctx, tx, in.InventoryID)
+		view, err := assembleInventory(ctx, tx, p, in.InventoryID)
 		if err != nil {
 			return err
 		}
@@ -381,8 +388,8 @@ func (s *Service) CompleteStockInventory(ctx context.Context, p tenant.Principal
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO stock_movements (
 					id, company_id, store_id, product_id, quantity_delta, movement_type, reason,
-					ref_type, ref_id, actor_user_id, origin_unit_name, origin_quantity
-				) VALUES ($1,$2,$3,$4,$5,'inventory_adjustment',$6,'inventory',$7,$8,$9,$10)
+					ref_type, ref_id, actor_user_id, origin_unit_name, origin_quantity, origin_provenance
+				) VALUES ($1,$2,$3,$4,$5,'inventory_adjustment',$6,'inventory',$7,$8,$9,$10,'recorded')
 			`, uuid.New(), p.CompanyID, session.storeID, productID, money.Num(delta), blankNull(reason), in.InventoryID, p.UserID, group[0].baseUnit, money.Num(delta)); err != nil {
 				return err
 			}
@@ -397,7 +404,7 @@ func (s *Service) CompleteStockInventory(ctx context.Context, p tenant.Principal
 		if err := audit(ctx, tx, p, &session.storeID, "stock.inventory.validate", "inventory", in.InventoryID, map[string]int{"lines": len(lines)}); err != nil {
 			return err
 		}
-		out, err = assembleInventory(ctx, tx, in.InventoryID)
+		out, err = assembleInventory(ctx, tx, p, in.InventoryID)
 		return err
 	})
 	return out, err
@@ -414,7 +421,7 @@ func (s *Service) GetStockInventory(ctx context.Context, p tenant.Principal, id 
 			return err
 		}
 		var err error
-		out, err = assembleInventory(ctx, tx, id)
+		out, err = assembleInventory(ctx, tx, p, id)
 		return err
 	})
 	return out, err
@@ -447,7 +454,7 @@ func inventoryStale() error {
 	return domain.Conflict("inventory_stale", "Le stock a changé pendant le comptage. Recomptez les articles concernés avant de valider.")
 }
 
-func assembleInventory(ctx context.Context, tx pgx.Tx, id uuid.UUID) (StockInventory, error) {
+func assembleInventory(ctx context.Context, tx pgx.Tx, p tenant.Principal, id uuid.UUID) (StockInventory, error) {
 	var out StockInventory
 	var note *string
 	var completed pgtype.Timestamptz
@@ -613,6 +620,16 @@ func assembleInventory(ctx context.Context, tx pgx.Tx, id uuid.UUID) (StockInven
 		line.line.VarianceCurrency = roll.currency
 		line.line.CostIncomplete = roll.incomplete
 		out.Lines = append(out.Lines, line.line)
+	}
+	visible, err := access.CanReadCost(ctx, tx, p.CompanyID, p.UserID, out.StoreID)
+	if err != nil {
+		return StockInventory{}, err
+	}
+	if !visible {
+		for i := range out.Lines {
+			out.Lines[i].VarianceValue = ""
+			out.Lines[i].VarianceCurrency = ""
+		}
 	}
 	return out, nil
 }

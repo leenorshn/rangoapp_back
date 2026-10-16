@@ -390,6 +390,31 @@ func argLimit(value any) int {
 	}
 }
 
+func optionalTime(value any) (time.Time, error) {
+	if value == nil {
+		return time.Time{}, nil
+	}
+	if text, ok := value.(string); ok && text == "" {
+		return time.Time{}, nil
+	}
+	parsed, ok := argTime(value)
+	if !ok {
+		return time.Time{}, domain.Invalid("period", "La période est illisible.")
+	}
+	return parsed, nil
+}
+
+func provenanceOr(value, origin string) string {
+	switch value {
+	case "recorded", "recovered", "legacy_unknown":
+		return value
+	}
+	if origin != "" {
+		return "recorded"
+	}
+	return "legacy_unknown"
+}
+
 func argTime(value any) (time.Time, bool) {
 	switch typed := value.(type) {
 	case time.Time:

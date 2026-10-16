@@ -134,6 +134,35 @@ func AuthorizeRead(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, 
 	return authorize(ctx, tx, companyID, userID, storeID, perm, false)
 }
 
+// CanReadCost is true only when the caller has both valuation and margin
+// rights. Each right still requires an offer that includes margins.
+func CanReadCost(ctx context.Context, tx pgx.Tx, companyID, userID, storeID uuid.UUID) (bool, error) {
+	var scope *uuid.UUID
+	if storeID != uuid.Nil {
+		id := storeID
+		scope = &id
+	}
+	valuationOK, err := costPermission(AuthorizeRead(ctx, tx, companyID, userID, scope, StockValuationRead))
+	if err != nil {
+		return false, err
+	}
+	marginOK, err := costPermission(AuthorizeRead(ctx, tx, companyID, userID, scope, MarginsRead))
+	if err != nil {
+		return false, err
+	}
+	return valuationOK && marginOK, nil
+}
+
+func costPermission(decision Decision, err error) (bool, error) {
+	if err == nil {
+		return true, nil
+	}
+	if de, ok := domain.As(err); ok && (de.Code == domain.CodePermissionDenied || de.Code == domain.CodeFailedPrecondition) {
+		return false, nil
+	}
+	return false, err
+}
+
 func authorize(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, storeID *uuid.UUID, perm string, gateCommercial bool) (Decision, error) {
 	var decision Decision
 	var status string

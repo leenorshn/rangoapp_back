@@ -71,7 +71,7 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 	`, id, p.CompanyID, sku, name, blank(description), blank(categoryName), nullableID(categoryID), base, blank(barcode), in.AllowFractional, money.Num(in.AlertThreshold)); err != nil {
 		return Product{}, mapWrite(err)
 	}
-	baseID, err := insertUnit(ctx, tx, p.CompanyID, id, base, decimal.NewFromInt(1), barcode, true, true, true, in.AllowFractional)
+	baseID, err := insertUnit(ctx, tx, p.CompanyID, id, base, decimal.NewFromInt(1), barcode, true, true, true, in.AllowFractional, in.BaseDimension)
 	if err != nil {
 		return Product{}, err
 	}
@@ -85,7 +85,7 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 			return Product{}, domain.AlreadyExists("Ce conditionnement existe déjà.")
 		}
 		purchase, sale, fractional := unitSwitches(unit, in.AllowFractional)
-		unitID, err := insertUnit(ctx, tx, p.CompanyID, id, unitName, unit.Factor, unit.Barcode, false, purchase, sale, fractional)
+		unitID, err := insertUnit(ctx, tx, p.CompanyID, id, unitName, unit.Factor, unit.Barcode, false, purchase, sale, fractional, unit.Dimension)
 		if err != nil {
 			return Product{}, err
 		}
@@ -338,7 +338,7 @@ func CreateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID uu
 		return Unit{}, err
 	}
 	purchase, sale, fractional := unitSwitches(in, productFractional)
-	id, err := insertUnit(ctx, tx, p.CompanyID, productID, in.Name, in.Factor, in.Barcode, false, purchase, sale, fractional)
+	id, err := insertUnit(ctx, tx, p.CompanyID, productID, in.Name, in.Factor, in.Barcode, false, purchase, sale, fractional, in.Dimension)
 	if err != nil {
 		return Unit{}, err
 	}
@@ -351,15 +351,15 @@ func UpdateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, unitID uuid.
 		return Unit{}, err
 	}
 	var productID uuid.UUID
-	var name string
+	var name, dimension string
 	var factorRaw string
 	var isBase, active, allowPurchase, allowSale, allowFractional bool
 	var barcode *string
 	err := tx.QueryRow(ctx, `
 		SELECT product_id, name, factor::text, is_base, active, barcode,
-		       allow_purchase, allow_sale, allow_fractional
+		       allow_purchase, allow_sale, allow_fractional, dimension
 		FROM product_units WHERE id = $1 FOR UPDATE
-	`, unitID).Scan(&productID, &name, &factorRaw, &isBase, &active, &barcode, &allowPurchase, &allowSale, &allowFractional)
+	`, unitID).Scan(&productID, &name, &factorRaw, &isBase, &active, &barcode, &allowPurchase, &allowSale, &allowFractional, &dimension)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Unit{}, domain.NotFound("Conditionnement introuvable.")
 	}
@@ -396,6 +396,32 @@ func UpdateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, unitID uuid.
 			return Unit{}, domain.FailedPrecondition("factor_locked", "Ce facteur ne peut plus changer : des ventes ou des achats l'utilisent déjà. Créez un nouveau conditionnement.")
 		}
 	}
+	nextDimension := dimension
+	if in.HasDimension {
+		parsed, err := storedDimension(in.Dimension)
+		if err != nil {
+			return Unit{}, err
+		}
+		nextDimension = parsed
+	}
+	if nextDimension != dimension {
+		if isBase {
+			var moved bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stock_movements WHERE product_id = $1)`, productID).Scan(&moved); err != nil {
+				return Unit{}, err
+			}
+			if moved {
+				return Unit{}, domain.FailedPrecondition("dimension_locked", "Cette dimension ne peut plus changer : l'article a déjà des mouvements de stock.")
+			}
+		}
+		used, err := unitUsed(ctx, tx, unitID)
+		if err != nil {
+			return Unit{}, err
+		}
+		if used {
+			return Unit{}, domain.FailedPrecondition("dimension_locked", "Cette dimension ne peut plus changer : le conditionnement est déjà utilisé.")
+		}
+	}
 	nextBarcode := ""
 	if barcode != nil {
 		nextBarcode = *barcode
@@ -420,9 +446,9 @@ func UpdateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, unitID uuid.
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE product_units
-		SET name = $2, factor = $3, barcode = $4, allow_purchase = $5, allow_sale = $6, allow_fractional = $7
+		SET name = $2, factor = $3, barcode = $4, allow_purchase = $5, allow_sale = $6, allow_fractional = $7, dimension = $8
 		WHERE id = $1
-	`, unitID, nextName, money.Num(nextFactor), blank(nextBarcode), allowPurchase, allowSale, allowFractional); err != nil {
+	`, unitID, nextName, money.Num(nextFactor), blank(nextBarcode), allowPurchase, allowSale, allowFractional, nextDimension); err != nil {
 		return Unit{}, mapWrite(err)
 	}
 	if isBase && nextName != name {
@@ -565,12 +591,16 @@ func unitSwitches(in UnitInput, inheritFractional bool) (purchase, sale, fractio
 	return purchase, sale, fractional
 }
 
-func insertUnit(ctx context.Context, tx pgx.Tx, companyID, productID uuid.UUID, name string, factor decimal.Decimal, barcode string, base, purchase, sale, fractional bool) (uuid.UUID, error) {
+func insertUnit(ctx context.Context, tx pgx.Tx, companyID, productID uuid.UUID, name string, factor decimal.Decimal, barcode string, base, purchase, sale, fractional bool, dimension string) (uuid.UUID, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 40 {
 		return uuid.Nil, domain.Invalid("unit", "Indiquez le nom du conditionnement.")
 	}
 	if err := validFactor(factor, base); err != nil {
+		return uuid.Nil, err
+	}
+	dimension, err := storedDimension(dimension)
+	if err != nil {
 		return uuid.Nil, err
 	}
 	barcode = strings.TrimSpace(barcode)
@@ -581,16 +611,103 @@ func insertUnit(ctx context.Context, tx pgx.Tx, companyID, productID uuid.UUID, 
 	if err := ensureBarcode(ctx, tx, barcode, productID, id); err != nil {
 		return uuid.Nil, err
 	}
-	_, err := tx.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO product_units (
 			id, company_id, product_id, name, factor, barcode, is_base, active,
-			allow_purchase, allow_sale, allow_fractional
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10)
-	`, id, companyID, productID, name, money.Num(factor), blank(barcode), base, purchase, sale, fractional)
+			allow_purchase, allow_sale, allow_fractional, dimension
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10,$11)
+	`, id, companyID, productID, name, money.Num(factor), blank(barcode), base, purchase, sale, fractional, dimension)
 	if err != nil {
 		return uuid.Nil, mapWrite(err)
 	}
 	return id, nil
+}
+
+func storedDimension(value string) (string, error) {
+	switch strings.TrimSpace(value) {
+	case "", "count":
+		return "count", nil
+	case "mass", "volume":
+		return strings.TrimSpace(value), nil
+	default:
+		return "", domain.Invalid("dimension", "La dimension doit être count, mass ou volume.")
+	}
+}
+
+func validDensity(value decimal.Decimal) error {
+	if !value.IsPositive() {
+		return domain.Invalid("density", "La densité doit être strictement positive.")
+	}
+	if value.Exponent() < -6 {
+		return domain.Invalid("density", "La densité a trop de décimales.")
+	}
+	return nil
+}
+
+// SetDensity records the kg-per-litre density of one product. Enabling the
+// conversion requires a positive density. Turning it off keeps the stored number
+// and stops new conversions. Existing movements keep the density they used.
+func SetDensity(ctx context.Context, tx pgx.Tx, p tenant.Principal, in DensityInput) (Product, error) {
+	if err := requireManage(ctx, tx, p, uuid.Nil); err != nil {
+		return Product{}, err
+	}
+	if in.ProductID == uuid.Nil {
+		return Product{}, domain.Invalid("product", "Indiquez l'article.")
+	}
+	status, err := lockStatus(ctx, tx, in.ProductID)
+	if err != nil {
+		return Product{}, err
+	}
+	if status != "active" {
+		return Product{}, domain.FailedPrecondition("product_archived", "Cet article est archivé.")
+	}
+	var currentDensity, currentReference *string
+	if err := tx.QueryRow(ctx, `
+		SELECT density_kg_per_liter::text, density_reference FROM products WHERE id = $1
+	`, in.ProductID).Scan(&currentDensity, &currentReference); err != nil {
+		return Product{}, err
+	}
+	var nextDensity any
+	if in.HasDensity {
+		if err := validDensity(in.Density); err != nil {
+			return Product{}, err
+		}
+		nextDensity = money.Num(in.Density)
+	} else if currentDensity != nil && strings.TrimSpace(*currentDensity) != "" {
+		parsed, err := decimal.NewFromString(*currentDensity)
+		if err != nil {
+			return Product{}, err
+		}
+		nextDensity = money.Num(parsed)
+	}
+	if in.Enabled && nextDensity == nil {
+		return Product{}, domain.Invalid("density", "Activez la conversion seulement avec une densité strictement positive.")
+	}
+	var reference any
+	if in.HasReference {
+		ref := strings.TrimSpace(in.Reference)
+		if ref == "" {
+			reference = nil
+		} else if len(ref) > 200 {
+			return Product{}, domain.Invalid("density", "La référence de densité est trop longue.")
+		} else {
+			reference = ref
+		}
+	} else if currentReference != nil {
+		reference = *currentReference
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE products
+		SET density_kg_per_liter = $2,
+		    density_reference = $3,
+		    cross_dimension_conversion_enabled = $4,
+		    density_updated_at = now(),
+		    density_updated_by = $5
+		WHERE id = $1
+	`, in.ProductID, nextDensity, reference, in.Enabled, p.UserID); err != nil {
+		return Product{}, mapWrite(err)
+	}
+	return Get(ctx, tx, p, in.ProductID, uuid.Nil)
 }
 
 func validFactor(factor decimal.Decimal, base bool) error {

@@ -222,7 +222,8 @@ func loadMany(ctx context.Context, tx pgx.Tx, ids, stores []uuid.UUID, preserveM
 		SELECT p.id, p.company_id, p.sku, p.name, p.description, p.category_id,
 		       COALESCE(c.name, p.category, ''), p.barcode, p.base_unit, p.allow_fractional,
 		       p.alert_threshold::text, p.status, (p.archived_at IS NOT NULL), p.created_at, p.updated_at,
-		       p.image_media_id
+		       p.image_media_id, p.density_kg_per_liter::text, p.density_reference,
+		       p.density_updated_at, p.density_updated_by, p.cross_dimension_conversion_enabled
 		FROM products p
 		LEFT JOIN product_categories c ON c.id = p.category_id
 		WHERE p.id = ANY($1::uuid[])
@@ -267,16 +268,28 @@ func scanProduct(row pgx.Row) (Product, error) {
 	var categoryID *uuid.UUID
 	var threshold string
 	var image pgtype.UUID
+	var density, reference *string
+	var densityAt *time.Time
+	var densityBy *uuid.UUID
+	var cross bool
 	if err := row.Scan(
 		&item.ID, &item.CompanyID, &item.SKU, &item.Name, &description, &categoryID,
 		&item.Category, &barcode, &item.BaseUnit, &item.AllowFractional,
 		&threshold, &item.Status, &item.Archived, &item.CreatedAt, &item.UpdatedAt, &image,
+		&density, &reference, &densityAt, &densityBy, &cross,
 	); err != nil {
 		return Product{}, err
 	}
 	if image.Valid {
 		item.ImageMediaID = uuid.UUID(image.Bytes)
 	}
+	item.DensityKgPerLiter = decimalText(density)
+	item.DensityReference = deref(reference)
+	item.DensityUpdatedAt = densityAt
+	if densityBy != nil {
+		item.DensityUpdatedBy = *densityBy
+	}
+	item.CrossDimensionEnabled = cross
 	item.Description = deref(description)
 	item.Barcode = deref(barcode)
 	if categoryID != nil {
@@ -305,9 +318,13 @@ func attach(ctx context.Context, tx pgx.Tx, products []Product, ids, stores []uu
 		if !ok {
 			continue
 		}
+		dimension := row.Dimension
+		if dimension == "" {
+			dimension = "count"
+		}
 		products[at].Units = append(products[at].Units, Unit{
 			ID: row.ID, ProductID: row.ProductID, Name: row.Name, Factor: plain(row.Factor),
-			Barcode: deref(row.Barcode), IsBase: row.IsBase, Active: row.Active,
+			Dimension: dimension, Barcode: deref(row.Barcode), IsBase: row.IsBase, Active: row.Active,
 			AllowPurchase: row.AllowPurchase, AllowSale: row.AllowSale, AllowFractional: row.AllowFractional,
 			Prices: []Price{},
 		})
@@ -396,9 +413,9 @@ func loadUnit(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Unit, error) {
 	var factor, barcode *string
 	err := tx.QueryRow(ctx, `
 		SELECT id, product_id, name, factor::text, barcode, is_base, active,
-		       allow_purchase, allow_sale, allow_fractional
+		       allow_purchase, allow_sale, allow_fractional, dimension
 		FROM product_units WHERE id = $1
-	`, id).Scan(&item.ID, &item.ProductID, &item.Name, &factor, &barcode, &item.IsBase, &item.Active, &item.AllowPurchase, &item.AllowSale, &item.AllowFractional)
+	`, id).Scan(&item.ID, &item.ProductID, &item.Name, &factor, &barcode, &item.IsBase, &item.Active, &item.AllowPurchase, &item.AllowSale, &item.AllowFractional, &item.Dimension)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Unit{}, domain.NotFound("Conditionnement introuvable.")
 	}
@@ -407,6 +424,9 @@ func loadUnit(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Unit, error) {
 	}
 	item.Factor = plain(deref(factor))
 	item.Barcode = deref(barcode)
+	if item.Dimension == "" {
+		item.Dimension = "count"
+	}
 	item.Prices = []Price{}
 	return item, nil
 }
@@ -420,12 +440,23 @@ func fromChange(row dbsql.ListCatalogChangesRow) Product {
 	if row.UpdatedAt.Valid {
 		updated = row.UpdatedAt.Time
 	}
+	var densityAt *time.Time
+	if row.DensityUpdatedAt.Valid {
+		stamp := row.DensityUpdatedAt.Time
+		densityAt = &stamp
+	}
+	densityBy := uuid.Nil
+	if row.DensityUpdatedBy != nil {
+		densityBy = *row.DensityUpdatedBy
+	}
 	return Product{
 		ID: row.ID, CompanyID: row.CompanyID, SKU: row.Sku, Name: row.Name,
 		Description: deref(row.Description), CategoryID: categoryID, Category: deref(row.Category),
 		Barcode: deref(row.Barcode), BaseUnit: row.BaseUnit, AllowFractional: row.AllowFractional,
 		AlertThreshold: plain(row.AlertThreshold), Status: row.Status, Archived: row.Archived,
-		UpdatedAt: updated,
+		UpdatedAt: updated, DensityKgPerLiter: decimalText(row.DensityKgPerLiter),
+		DensityReference: deref(row.DensityReference), DensityUpdatedAt: densityAt, DensityUpdatedBy: densityBy,
+		CrossDimensionEnabled: row.CrossDimensionConversionEnabled,
 	}
 }
 
@@ -502,6 +533,17 @@ func deref(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func decimalText(raw *string) string {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return ""
+	}
+	parsed, err := decimal.NewFromString(*raw)
+	if err != nil {
+		return strings.TrimSpace(*raw)
+	}
+	return parsed.String()
 }
 
 func plain(raw string) string {

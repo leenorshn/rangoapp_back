@@ -160,6 +160,7 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		product, unit                 uuid.UUID
 		name                          string
 		qty, base, unitCost, lineCost decimal.Decimal
+		density                       *decimal.Decimal
 	}
 	lines := make([]line, 0, len(in.Lines))
 	for _, input := range in.Lines {
@@ -176,18 +177,18 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		var unitID uuid.UUID
 		var factor pgtype.Numeric
 		var active, allowPurchase, unitFractional bool
-		var unitName string
+		var unitName, dimension string
 		var err error
 		if input.ProductUnitID != nil && *input.ProductUnitID != uuid.Nil {
 			err = tx.QueryRow(ctx, `
-				SELECT id, name, factor, active, allow_purchase, allow_fractional
+				SELECT id, name, factor, active, allow_purchase, allow_fractional, dimension
 				FROM product_units WHERE id = $1 AND product_id = $2
-			`, *input.ProductUnitID, input.ProductID).Scan(&unitID, &unitName, &factor, &active, &allowPurchase, &unitFractional)
+			`, *input.ProductUnitID, input.ProductID).Scan(&unitID, &unitName, &factor, &active, &allowPurchase, &unitFractional, &dimension)
 		} else {
 			err = tx.QueryRow(ctx, `
-				SELECT id, name, factor, active, allow_purchase, allow_fractional
+				SELECT id, name, factor, active, allow_purchase, allow_fractional, dimension
 				FROM product_units WHERE product_id = $1 AND name = $2
-			`, input.ProductID, strings.TrimSpace(input.UnitName)).Scan(&unitID, &unitName, &factor, &active, &allowPurchase, &unitFractional)
+			`, input.ProductID, strings.TrimSpace(input.UnitName)).Scan(&unitID, &unitName, &factor, &active, &allowPurchase, &unitFractional, &dimension)
 		}
 		if err != nil {
 			return ReceiveResult{}, domain.NotFound("Conditionnement introuvable.")
@@ -205,11 +206,18 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		if err != nil {
 			return ReceiveResult{}, err
 		}
-		base := input.Quantity.Mul(factorDec)
+		conv, err := loadConversion(ctx, tx, input.ProductID)
+		if err != nil {
+			return ReceiveResult{}, err
+		}
+		base, density, err := convertQuantity(input.Quantity, factorDec, dimension, conv)
+		if err != nil {
+			return ReceiveResult{}, err
+		}
 		unitCost := money.Round(input.UnitCost)
 		lineCost := money.Round(input.Quantity.Mul(unitCost))
 		total = total.Add(lineCost)
-		lines = append(lines, line{product: input.ProductID, unit: unitID, name: unitName, qty: input.Quantity, base: base, unitCost: unitCost, lineCost: lineCost})
+		lines = append(lines, line{product: input.ProductID, unit: unitID, name: unitName, qty: input.Quantity, base: base, unitCost: unitCost, lineCost: lineCost, density: density})
 	}
 	var supplier any
 	supplierText := ""
@@ -253,9 +261,9 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type, ref_type, ref_id, actor_user_id,
-				origin_unit_id, origin_unit_name, origin_quantity
-			) VALUES ($1,$2,$3,$4,$5,'receive','purchase',$6,$7,$8,$9,$10)
-		`, uuid.New(), p.CompanyID, in.StoreID, line.product, money.Num(line.base), purchaseID, p.UserID, line.unit, line.name, money.Num(line.qty)); err != nil {
+				origin_unit_id, origin_unit_name, origin_quantity, density_kg_per_liter, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'receive','purchase',$6,$7,$8,$9,$10,$11,'recorded')
+		`, uuid.New(), p.CompanyID, in.StoreID, line.product, money.Num(line.base), purchaseID, p.UserID, line.unit, line.name, money.Num(line.qty), densityArg(line.density)); err != nil {
 			return ReceiveResult{}, err
 		}
 	}
@@ -486,8 +494,9 @@ func (s *Service) CompleteInventory(ctx context.Context, p tenant.Principal, in 
 			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO stock_movements (
-					id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id
-				) VALUES ($1,$2,$3,$4,$5,'adjustment',$6,'inventory',$7,$8)
+					id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id,
+					origin_provenance
+				) VALUES ($1,$2,$3,$4,$5,'adjustment',$6,'inventory',$7,$8,'legacy_unknown')
 			`, uuid.New(), p.CompanyID, in.StoreID, count.ProductID, money.Num(delta), count.Reason, id, p.UserID); err != nil {
 				return err
 			}

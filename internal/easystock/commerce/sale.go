@@ -71,6 +71,7 @@ type resolvedLine struct {
 	UnitCost     decimal.Decimal
 	CostComplete bool
 	UnitName     string
+	Density      *decimal.Decimal
 }
 
 func (s *Service) ConfirmSale(ctx context.Context, p tenant.Principal, in ConfirmSaleInput) (SaleResult, error) {
@@ -265,9 +266,9 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type, ref_type, ref_id, actor_user_id,
-				origin_unit_id, origin_unit_name, origin_quantity
-			) VALUES ($1,$2,$3,$4,$5,'sale','sale',$6,$7,$8,$9,$10)
-		`, uuid.New(), p.CompanyID, in.StoreID, line.ProductID, money.Num(line.BaseQty.Neg()), saleID, p.UserID, line.UnitID, line.UnitName, money.Num(line.Quantity)); err != nil {
+				origin_unit_id, origin_unit_name, origin_quantity, density_kg_per_liter, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'sale','sale',$6,$7,$8,$9,$10,$11,'recorded')
+		`, uuid.New(), p.CompanyID, in.StoreID, line.ProductID, money.Num(line.BaseQty.Neg()), saleID, p.UserID, line.UnitID, line.UnitName, money.Num(line.Quantity), densityArg(line.Density)); err != nil {
 			return SaleResult{}, err
 		}
 		totals[line.ProductID] = totals[line.ProductID].Add(line.BaseQty)
@@ -409,10 +410,11 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	var unitID uuid.UUID
 	var factor pgtype.Numeric
 	var active, allowSale, unitFractional bool
+	var dimension string
 	if err := tx.QueryRow(ctx, `
-		SELECT id, factor, active, allow_sale, allow_fractional
+		SELECT id, factor, active, allow_sale, allow_fractional, dimension
 		FROM product_units WHERE product_id = $1 AND name = $2
-	`, line.ProductID, line.UnitName).Scan(&unitID, &factor, &active, &allowSale, &unitFractional); err != nil {
+	`, line.ProductID, line.UnitName).Scan(&unitID, &factor, &active, &allowSale, &unitFractional, &dimension); err != nil {
 		return resolvedLine{}, domain.NotFound("Conditionnement introuvable pour cet article.")
 	}
 	if !active {
@@ -445,13 +447,21 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	if !unitPrice.Equal(money.Round(line.ExpectedUnitPrice)) {
 		return resolvedLine{}, domain.Conflict("price_changed", "Le prix a changé depuis la préparation de la vente. Vérifiez le nouveau prix avant de confirmer.")
 	}
-	baseQty := line.Quantity.Mul(factorDec)
+	conv, err := loadConversion(ctx, tx, line.ProductID)
+	if err != nil {
+		return resolvedLine{}, err
+	}
+	baseQty, density, err := convertQuantity(line.Quantity, factorDec, dimension, conv)
+	if err != nil {
+		return resolvedLine{}, err
+	}
 	return resolvedLine{
 		ProductID: line.ProductID,
 		UnitID:    unitID,
 		UnitName:  line.UnitName,
 		Quantity:  line.Quantity,
 		BaseQty:   baseQty,
+		Density:   density,
 		UnitPrice: unitPrice,
 		LineGross: money.Round(line.Quantity.Mul(unitPrice)),
 	}, nil

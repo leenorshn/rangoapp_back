@@ -37,6 +37,19 @@ func (s *Service) UpdateCatalogProduct(ctx context.Context, p tenant.Principal, 
 	return out, err
 }
 
+func (s *Service) SetProductDensity(ctx context.Context, p tenant.Principal, in catalog.DensityInput) (catalog.Product, error) {
+	var out catalog.Product
+	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = catalog.SetDensity(ctx, tx, p, in)
+		if err != nil {
+			return err
+		}
+		return audit(ctx, tx, p, nil, "catalog.density", "product", out.ID, map[string]bool{"enabled": in.Enabled})
+	})
+	return out, err
+}
+
 func (s *Service) ArchiveCatalogProduct(ctx context.Context, p tenant.Principal, id uuid.UUID) (catalog.Product, error) {
 	var out catalog.Product
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {

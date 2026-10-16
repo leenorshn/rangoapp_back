@@ -59,15 +59,22 @@ type stockUnit struct {
 	id         uuid.UUID
 	name       string
 	factor     decimal.Decimal
+	dimension  string
 	fractional bool
 	sku        string
 	product    string
+	conversion conversion
+}
+
+func (u stockUnit) toBase(qty decimal.Decimal) (decimal.Decimal, *decimal.Decimal, error) {
+	return convertQuantity(qty, u.factor, u.dimension, u.conversion)
 }
 
 type preparedOpening struct {
 	unit     stockUnit
 	qty      decimal.Decimal
 	base     decimal.Decimal
+	density  *decimal.Decimal
 	cost     *decimal.Decimal
 	currency string
 	lineCost decimal.Decimal
@@ -167,8 +174,12 @@ func openInitialStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ope
 		if !hasCost && input.Currency != "" {
 			return OpeningResult{}, domain.Invalid("opening", "Indiquez le coût avec sa devise, ou omettez les deux.")
 		}
+		base, density, err := unit.toBase(input.Quantity)
+		if err != nil {
+			return OpeningResult{}, err
+		}
 		row := preparedOpening{
-			unit: unit, qty: input.Quantity, base: input.Quantity.Mul(unit.factor),
+			unit: unit, qty: input.Quantity, base: base, density: density,
 			currency: input.Currency, hasCost: hasCost,
 		}
 		if hasCost {
@@ -210,7 +221,7 @@ func openInitialStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ope
 		sort.SliceStable(group, func(i, j int) bool { return group[i].unit.id.String() < group[j].unit.id.String() })
 		if group[0].hasCost {
 			for _, line := range group {
-				baseUnitCost := line.cost.Div(line.unit.factor)
+				baseUnitCost := line.cost.Div(line.base.Div(line.qty))
 				if err := applyReceiptCost(ctx, tx, p, in.StoreID, line.currency, productID, line.base, baseUnitCost); err != nil {
 					return OpeningResult{}, err
 				}
@@ -277,10 +288,11 @@ func openInitialStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ope
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
 				id, company_id, store_id, product_id, quantity_delta, movement_type,
-				ref_type, ref_id, actor_user_id, origin_unit_id, origin_unit_name, origin_quantity, origin_factor
-			) VALUES ($1,$2,$3,$4,$5,'opening','stock_opening',$6,$7,$8,$9,$10,$11)
+				ref_type, ref_id, actor_user_id, origin_unit_id, origin_unit_name, origin_quantity, origin_factor,
+				density_kg_per_liter, origin_provenance
+			) VALUES ($1,$2,$3,$4,$5,'opening','stock_opening',$6,$7,$8,$9,$10,$11,$12,'recorded')
 		`, uuid.New(), p.CompanyID, in.StoreID, line.unit.productID, money.Num(line.base), openingID, p.UserID,
-			line.unit.id, line.unit.name, money.Num(line.qty), money.Num(line.unit.factor)); err != nil {
+			line.unit.id, line.unit.name, money.Num(line.qty), money.Num(line.unit.factor), densityArg(line.density)); err != nil {
 			return OpeningResult{}, err
 		}
 		resultLines = append(resultLines, result)
@@ -336,13 +348,13 @@ func loadActiveUnit(ctx context.Context, tx pgx.Tx, productID, unitID uuid.UUID)
 	if status != "active" {
 		return stockUnit{}, domain.FailedPrecondition("product_archived", "Cet article est archivé.")
 	}
-	var name string
+	var name, dimension string
 	var factor pgtype.Numeric
 	var active, fractional bool
 	err := tx.QueryRow(ctx, `
-		SELECT name, factor, active, allow_fractional
+		SELECT name, factor, active, allow_fractional, dimension
 		FROM product_units WHERE id = $1 AND product_id = $2
-	`, unitID, productID).Scan(&name, &factor, &active, &fractional)
+	`, unitID, productID).Scan(&name, &factor, &active, &fractional, &dimension)
 	if err != nil {
 		return stockUnit{}, domain.NotFound("Conditionnement introuvable.")
 	}
@@ -353,9 +365,13 @@ func loadActiveUnit(ctx context.Context, tx pgx.Tx, productID, unitID uuid.UUID)
 	if err != nil {
 		return stockUnit{}, err
 	}
+	conv, err := loadConversion(ctx, tx, productID)
+	if err != nil {
+		return stockUnit{}, err
+	}
 	return stockUnit{
-		productID: productID, id: unitID, name: name, factor: factorDec,
-		fractional: fractional, sku: sku, product: productName,
+		productID: productID, id: unitID, name: name, factor: factorDec, dimension: dimension,
+		fractional: fractional, sku: sku, product: productName, conversion: conv,
 	}, nil
 }
 

@@ -63,12 +63,5 @@ func CostVisible(ctx context.Context, tx pgx.Tx, p tenant.Principal, storeID uui
 	if storeID == uuid.Nil {
 		return false, nil
 	}
-	_, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, &storeID, access.MarginsRead)
-	if err == nil {
-		return true, nil
-	}
-	if de, ok := domain.As(err); ok && (de.Code == domain.CodePermissionDenied || de.Code == domain.CodeFailedPrecondition) {
-		return false, nil
-	}
-	return false, err
+	return access.CanReadCost(ctx, tx, p.CompanyID, p.UserID, storeID)
 }

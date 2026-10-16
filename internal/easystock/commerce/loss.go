@@ -28,20 +28,21 @@ type StockLossInput struct {
 }
 
 type StockMovementResult struct {
-	ID             string    `json:"id"`
-	ProductID      string    `json:"productId"`
-	SKU            string    `json:"sku"`
-	ProductName    string    `json:"productName"`
-	StoreID        string    `json:"storeId"`
-	Type           string    `json:"type"`
-	Quantity       string    `json:"quantity"`
-	OriginUnit     string    `json:"originUnit,omitempty"`
-	OriginQuantity string    `json:"originQuantity,omitempty"`
-	RefType        string    `json:"refType,omitempty"`
-	RefID          string    `json:"refId,omitempty"`
-	ActorID        string    `json:"actorId,omitempty"`
-	Reason         string    `json:"reason,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID               string    `json:"id"`
+	ProductID        string    `json:"productId"`
+	SKU              string    `json:"sku"`
+	ProductName      string    `json:"productName"`
+	StoreID          string    `json:"storeId"`
+	Type             string    `json:"type"`
+	Quantity         string    `json:"quantity"`
+	OriginUnit       string    `json:"originUnit,omitempty"`
+	OriginQuantity   string    `json:"originQuantity,omitempty"`
+	OriginProvenance string    `json:"originProvenance,omitempty"`
+	RefType          string    `json:"refType,omitempty"`
+	RefID            string    `json:"refId,omitempty"`
+	ActorID          string    `json:"actorId,omitempty"`
+	Reason           string    `json:"reason,omitempty"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 func (s *Service) RecordStockLoss(ctx context.Context, p tenant.Principal, in StockLossInput) (StockMovementResult, error) {
@@ -106,7 +107,10 @@ func recordStockLoss(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Stoc
 	if err := soldQuantityAllowed(unit.fractional, in.Quantity); err != nil {
 		return StockMovementResult{}, err
 	}
-	base := in.Quantity.Mul(unit.factor)
+	base, density, err := unit.toBase(in.Quantity)
+	if err != nil {
+		return StockMovementResult{}, err
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO stock_balances (company_id, store_id, product_id, quantity, cost_complete)
 		VALUES ($1,$2,$3,0,false)
@@ -159,11 +163,11 @@ func recordStockLoss(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Stoc
 		INSERT INTO stock_movements (
 			id, company_id, store_id, product_id, quantity_delta, movement_type, reason, note,
 			ref_type, ref_id, actor_user_id, origin_unit_id, origin_unit_name, origin_quantity, origin_factor,
-			exit_value, exit_currency
-		) VALUES ($1,$2,$3,$4,$5,'loss',$6,$7,'stock_loss',$1,$8,$9,$10,$11,$12,$13,$14)
+			exit_value, exit_currency, density_kg_per_liter, origin_provenance
+		) VALUES ($1,$2,$3,$4,$5,'loss',$6,$7,'stock_loss',$1,$8,$9,$10,$11,$12,$13,$14,$15,'recorded')
 		RETURNING created_at
 	`, movementID, p.CompanyID, in.StoreID, in.ProductID, money.Num(base.Neg()), in.Reason, blankNull(in.Note), p.UserID,
-		unit.id, unit.name, money.Num(in.Quantity), money.Num(unit.factor), exitValue, exitCurrency).Scan(&createdAt); err != nil {
+		unit.id, unit.name, money.Num(in.Quantity), money.Num(unit.factor), exitValue, exitCurrency, densityArg(density)).Scan(&createdAt); err != nil {
 		return StockMovementResult{}, err
 	}
 	if err := audit(ctx, tx, p, &in.StoreID, "stock.loss.create", "stock_loss", movementID, map[string]string{"reason": in.Reason}); err != nil {
@@ -172,7 +176,7 @@ func recordStockLoss(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Stoc
 	return StockMovementResult{
 		ID: movementID.String(), ProductID: in.ProductID.String(), SKU: unit.sku, ProductName: unit.product,
 		StoreID: in.StoreID.String(), Type: "loss", Quantity: base.Neg().String(),
-		OriginUnit: unit.name, OriginQuantity: in.Quantity.String(),
+		OriginUnit: unit.name, OriginQuantity: in.Quantity.String(), OriginProvenance: "recorded",
 		RefType: "stock_loss", RefID: movementID.String(), ActorID: p.UserID.String(),
 		Reason: in.Reason, CreatedAt: createdAt,
 	}, nil

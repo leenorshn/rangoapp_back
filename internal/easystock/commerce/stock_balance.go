@@ -98,7 +98,7 @@ func addUncostedQuantity(ctx context.Context, tx pgx.Tx, companyID, storeID, pro
 	return err
 }
 
-func postStockMovement(ctx context.Context, tx pgx.Tx, p tenant.Principal, storeID, productID uuid.UUID, delta decimal.Decimal, movementType, reason, refType string, refID uuid.UUID, unit stockUnit, originQty decimal.Decimal, exitValue *decimal.Decimal, exitCurrency string) error {
+func postStockMovement(ctx context.Context, tx pgx.Tx, p tenant.Principal, storeID, productID uuid.UUID, delta decimal.Decimal, movementType, reason, refType string, refID uuid.UUID, unit stockUnit, originQty decimal.Decimal, exitValue *decimal.Decimal, exitCurrency string, density *decimal.Decimal) error {
 	var value any
 	var currency any
 	if exitValue != nil && validCurrency(exitCurrency) {
@@ -109,9 +109,9 @@ func postStockMovement(ctx context.Context, tx pgx.Tx, p tenant.Principal, store
 		INSERT INTO stock_movements (
 			id, company_id, store_id, product_id, quantity_delta, movement_type, reason,
 			ref_type, ref_id, actor_user_id, origin_unit_id, origin_unit_name, origin_quantity, origin_factor,
-			exit_value, exit_currency
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+			exit_value, exit_currency, density_kg_per_liter, origin_provenance
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'recorded')
 	`, uuid.New(), p.CompanyID, storeID, productID, money.Num(delta), movementType, blankNull(reason),
-		refType, refID, p.UserID, unit.id, unit.name, money.Num(originQty), money.Num(unit.factor), value, currency)
+		refType, refID, p.UserID, unit.id, unit.name, money.Num(originQty), money.Num(unit.factor), value, currency, densityArg(density))
 	return err
 }
