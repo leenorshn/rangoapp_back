@@ -164,9 +164,10 @@ func TestEmployeeCreationIsolationAndPasswordChange(t *testing.T) {
 	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, owner.CompanyID); err != nil {
 		t.Fatal(err)
 	}
+	storeID := uuid.New()
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO stores (id, company_id, name) VALUES ($1,$2,'Centre')
-	`, uuid.New(), owner.CompanyID); err != nil {
+	`, storeID, owner.CompanyID); err != nil {
 		t.Fatal(err)
 	}
 	principal, err := svc.Principal(ctx, owner.AccessToken)
@@ -181,6 +182,35 @@ func TestEmployeeCreationIsolationAndPasswordChange(t *testing.T) {
 	}
 	if seller.PhoneVerified || !seller.MustChangePassword || seller.Role != "seller" {
 		t.Fatalf("%+v", seller)
+	}
+	if len(seller.StoreIDs) != 1 || seller.StoreIDs[0] != storeID {
+		t.Fatalf("seller assignment %+v", seller.StoreIDs)
+	}
+	profile, err := svc.Me(ctx, seller.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attached bool
+	for _, company := range profile.Companies {
+		if company.CompanyID == owner.CompanyID && len(company.StoreIDs) == 1 && company.StoreIDs[0] == storeID {
+			attached = true
+		}
+	}
+	if !attached {
+		t.Fatalf("me %+v", profile.Companies)
+	}
+	staff, err := svc.Employees(ctx, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed bool
+	for _, row := range staff {
+		if row.UserID == seller.UserID && len(row.StoreIDs) == 1 && row.StoreIDs[0] == storeID {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatalf("employees %+v", staff)
 	}
 	var hashBefore string
 	if err := admin.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, owner.UserID).Scan(&hashBefore); err != nil {
@@ -236,6 +266,36 @@ func TestEmployeeCreationIsolationAndPasswordChange(t *testing.T) {
 	restricted, err := svc.Principal(ctx, logged.AccessToken)
 	if err != nil {
 		t.Fatal(err)
+	}
+	ownerView := api.Execute(api.WithPrincipal(ctx, principal), schema, `{
+		me { companies { storeIds } }
+		employees { userId storeIds }
+	}`, nil)
+	if len(ownerView.Errors) > 0 {
+		t.Fatal(ownerView.Errors)
+	}
+	ownerCompanies := ownerView.Data.(map[string]any)["me"].(map[string]any)["companies"].([]any)
+	if len(ownerCompanies) == 0 || len(ownerCompanies[0].(map[string]any)["storeIds"].([]any)) != 0 {
+		t.Fatalf("owner attachment %v", ownerCompanies)
+	}
+	var sellerShown bool
+	for _, item := range ownerView.Data.(map[string]any)["employees"].([]any) {
+		row := item.(map[string]any)
+		if row["userId"] == seller.UserID.String() {
+			ids := row["storeIds"].([]any)
+			sellerShown = len(ids) == 1 && ids[0] == storeID.String()
+		}
+	}
+	if !sellerShown {
+		t.Fatalf("%v", ownerView.Data)
+	}
+	sellerView := api.Execute(api.WithPrincipal(ctx, restricted), schema, `{ me { companies { storeIds } } }`, nil)
+	if len(sellerView.Errors) > 0 {
+		t.Fatal(sellerView.Errors)
+	}
+	sellerCompanies := sellerView.Data.(map[string]any)["me"].(map[string]any)["companies"].([]any)
+	if len(sellerCompanies) != 1 || sellerCompanies[0].(map[string]any)["storeIds"].([]any)[0] != storeID.String() {
+		t.Fatalf("%v", sellerCompanies)
 	}
 	result := api.Execute(api.WithPrincipal(ctx, restricted), schema, `mutation { confirmSale(input: {idempotencyKey:"k", storeId:"`+uuid.NewString()+`", currency:"USD", lines:[{productId:"`+uuid.NewString()+`", unitName:"piece", quantity:"1", expectedUnitPrice:"1"}], payments:[{method:"cash", amount:"1"}]}) { saleId } }`, nil)
 	if len(result.Errors) == 0 || result.Errors[0].Extensions["code"] != "MUST_CHANGE_PASSWORD" {

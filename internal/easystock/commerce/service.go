@@ -83,7 +83,7 @@ func mapDB(err error) error {
 			return domain.FailedPrecondition("cash_session_closed", "Cette session de caisse est clôturée. Enregistrez la correction sur une session ouverte.")
 		case strings.Contains(pgErr.Message, "confirmed sale"):
 			return domain.FailedPrecondition("sale_immutable", "Une vente confirmée ne peut pas être modifiée. Créez un retour.")
-		case pgErr.ConstraintName == "cash_sessions_one_open":
+		case pgErr.ConstraintName == "cash_sessions_one_open" || (pgErr.Code == "23505" && strings.Contains(pgErr.Message, "cash_sessions_one_open")):
 			return domain.FailedPrecondition("cash_session_open", "Une session est déjà ouverte sur cette caisse.")
 		case pgErr.ConstraintName == "stock_balances_quantity_nonnegative":
 			return domain.Conflict("stock_conflict", "Stock insuffisant pour cet article. Réduisez la quantité ou approvisionnez la boutique.")

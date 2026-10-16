@@ -15,7 +15,7 @@ type reportSource struct {
 	filter    reports.Filter
 }
 
-func readFields(deps Deps) graphql.Fields {
+func readFields(deps Deps) (graphql.Fields, graphql.Fields) {
 	moneyAmount := graphql.NewObject(graphql.ObjectConfig{
 		Name: "MoneyAmount",
 		Fields: graphql.Fields{
@@ -89,20 +89,13 @@ func readFields(deps Deps) graphql.Fields {
 			"updatedAt":      &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
 		},
 	})
-	openSession := graphql.NewObject(graphql.ObjectConfig{
-		Name: "OpenCashSession",
-		Fields: graphql.Fields{
-			"id":       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"openedAt": &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"balances": &graphql.Field{Type: graphql.NewList(graphql.NewNonNull(moneyAmount))},
-		},
-	})
+	cashSessionType, cashQueries, cashMutations := cashAPI(deps, moneyAmount)
 	register := graphql.NewObject(graphql.ObjectConfig{
 		Name: "CashRegister",
 		Fields: graphql.Fields{
 			"id":          &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
 			"name":        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"openSession": &graphql.Field{Type: openSession},
+			"openSession": &graphql.Field{Type: cashSessionType},
 		},
 	})
 	methodTotal := graphql.NewObject(graphql.ObjectConfig{
@@ -178,7 +171,7 @@ func readFields(deps Deps) graphql.Fields {
 		"afterId": &graphql.ArgumentConfig{Type: graphql.ID},
 		"limit":   &graphql.ArgumentConfig{Type: graphql.Int},
 	}
-	return graphql.Fields{
+	fields := graphql.Fields{
 		"sales": &graphql.Field{
 			Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(sale))),
 			Args: pageArgs,
@@ -324,15 +317,7 @@ func readFields(deps Deps) graphql.Fields {
 				for _, row := range rows {
 					item := map[string]any{"id": row.ID.String(), "name": row.Name}
 					if row.OpenSession != nil {
-						session := map[string]any{"id": row.OpenSession.ID.String(), "openedAt": row.OpenSession.OpenedAt}
-						if row.OpenSession.AmountsOK {
-							balances := make([]map[string]any, 0, len(row.OpenSession.Balances))
-							for _, balance := range row.OpenSession.Balances {
-								balances = append(balances, map[string]any{"currency": balance.Currency, "amount": balance.Amount})
-							}
-							session["balances"] = balances
-						}
-						item["openSession"] = session
+						item["openSession"] = cashSessionMap(*row.OpenSession)
 					}
 					out = append(out, item)
 				}
@@ -372,6 +357,10 @@ func readFields(deps Deps) graphql.Fields {
 			},
 		},
 	}
+	for name, field := range cashQueries {
+		fields[name] = field
+	}
+	return fields, cashMutations
 }
 
 func storePage(p graphql.ResolveParams, deps Deps) (tenant.Principal, uuid.UUID, readmodel.Page, error) {

@@ -53,6 +53,7 @@ type MembershipView struct {
 	CompanyName string
 	Role        string
 	Status      string
+	StoreIDs    []uuid.UUID
 }
 
 type EmployeeInput struct {
@@ -71,6 +72,7 @@ type Employee struct {
 	Status             string
 	MustChangePassword bool
 	PhoneVerified      bool
+	StoreIDs           []uuid.UUID
 }
 
 func (s *Service) CompleteSignup(ctx context.Context, in SignupInput) (SessionResult, error) {
@@ -311,9 +313,40 @@ func (s *Service) Me(ctx context.Context, userID uuid.UUID) (Profile, error) {
 		if err := rows.Scan(&item.CompanyID, &item.CompanyName, &item.Role, &item.Status); err != nil {
 			return Profile{}, err
 		}
+		item.StoreIDs = []uuid.UUID{}
 		profile.Companies = append(profile.Companies, item)
 	}
-	return profile, rows.Err()
+	if err := rows.Err(); err != nil {
+		return Profile{}, err
+	}
+	rows.Close()
+	assigned, err := s.pool.Query(ctx, `
+		SELECT company_id, store_id
+		FROM store_assignments
+		WHERE user_id = $1
+		ORDER BY store_id
+	`, userID)
+	if err != nil {
+		return Profile{}, err
+	}
+	defer assigned.Close()
+	byCompany := map[uuid.UUID][]uuid.UUID{}
+	for assigned.Next() {
+		var companyID, storeID uuid.UUID
+		if err := assigned.Scan(&companyID, &storeID); err != nil {
+			return Profile{}, err
+		}
+		byCompany[companyID] = append(byCompany[companyID], storeID)
+	}
+	if err := assigned.Err(); err != nil {
+		return Profile{}, err
+	}
+	for i := range profile.Companies {
+		if ids := byCompany[profile.Companies[i].CompanyID]; len(ids) > 0 {
+			profile.Companies[i].StoreIDs = ids
+		}
+	}
+	return profile, nil
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID, sessionID uuid.UUID, current, next string, req Request) (SessionResult, error) {
@@ -533,7 +566,8 @@ func (s *Service) CreateEmployee(ctx context.Context, actor tenant.Principal, in
 	`, uuid.New(), actor.CompanyID, userID, in.Role); err != nil {
 		return Employee{}, err
 	}
-	if err := s.assignStore(ctx, tx, actor.CompanyID, userID, in.StoreID); err != nil {
+	assigned, err := s.assignStore(ctx, tx, actor.CompanyID, userID, in.StoreID)
+	if err != nil {
 		return Employee{}, err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -545,42 +579,46 @@ func (s *Service) CreateEmployee(ctx context.Context, actor tenant.Principal, in
 	if err := tx.Commit(ctx); err != nil {
 		return Employee{}, err
 	}
-	return Employee{UserID: userID, FullName: in.FullName, Phone: number, Role: in.Role, Status: "active", MustChangePassword: true}, nil
+	storeIDs := []uuid.UUID{}
+	if assigned != uuid.Nil {
+		storeIDs = []uuid.UUID{assigned}
+	}
+	return Employee{UserID: userID, FullName: in.FullName, Phone: number, Role: in.Role, Status: "active", MustChangePassword: true, StoreIDs: storeIDs}, nil
 }
 
-func (s *Service) assignStore(ctx context.Context, tx pgx.Tx, companyID, userID, storeID uuid.UUID) error {
+func (s *Service) assignStore(ctx context.Context, tx pgx.Tx, companyID, userID, storeID uuid.UUID) (uuid.UUID, error) {
 	if storeID != uuid.Nil {
 		var ok bool
 		if err := tx.QueryRow(ctx, `
 			SELECT true FROM stores WHERE id = $1 AND company_id = $2 AND archived_at IS NULL
 		`, storeID, companyID).Scan(&ok); err != nil || !ok {
-			return domain.NotFound("Boutique introuvable.")
+			return uuid.Nil, domain.NotFound("Boutique introuvable.")
 		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO store_assignments (company_id, store_id, user_id) VALUES ($1,$2,$3)
 		`, companyID, storeID, userID)
-		return err
+		return storeID, err
 	}
 	var only uuid.UUID
 	err := tx.QueryRow(ctx, `
 		SELECT id FROM stores WHERE company_id = $1 AND archived_at IS NULL
 	`, companyID).Scan(&only)
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, pgx.ErrTooManyRows) {
-		return nil
+		return uuid.Nil, nil
 	}
 	if err != nil {
-		return err
+		return uuid.Nil, err
 	}
 	var extra int
 	if err := tx.QueryRow(ctx, `
 		SELECT count(*) FROM stores WHERE company_id = $1 AND archived_at IS NULL
 	`, companyID).Scan(&extra); err != nil || extra != 1 {
-		return nil
+		return uuid.Nil, nil
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO store_assignments (company_id, store_id, user_id) VALUES ($1,$2,$3)
 	`, companyID, only, userID)
-	return err
+	return only, err
 }
 
 func (s *Service) UpdateEmployeeRole(ctx context.Context, actor tenant.Principal, userID uuid.UUID, role string) error {
@@ -752,10 +790,38 @@ func (s *Service) Employees(ctx context.Context, actor tenant.Principal) ([]Empl
 		if err := rows.Scan(&item.UserID, &item.FullName, &item.Phone, &item.Role, &item.Status, &item.MustChangePassword, &item.PhoneVerified); err != nil {
 			return nil, err
 		}
+		item.StoreIDs = []uuid.UUID{}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+	links, err := tx.Query(ctx, `
+		SELECT user_id, store_id
+		FROM store_assignments
+		WHERE company_id = $1
+		ORDER BY store_id
+	`, actor.CompanyID)
+	if err != nil {
+		return nil, err
+	}
+	defer links.Close()
+	byUser := map[uuid.UUID][]uuid.UUID{}
+	for links.Next() {
+		var userID, storeID uuid.UUID
+		if err := links.Scan(&userID, &storeID); err != nil {
+			return nil, err
+		}
+		byUser[userID] = append(byUser[userID], storeID)
+	}
+	if err := links.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if ids := byUser[out[i].UserID]; len(ids) > 0 {
+			out[i].StoreIDs = ids
+		}
 	}
 	return out, tx.Commit(ctx)
 }

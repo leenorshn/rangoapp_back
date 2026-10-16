@@ -337,26 +337,29 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	if !line.Quantity.IsPositive() {
 		return resolvedLine{}, domain.Invalid("quantity", "La quantité doit être supérieure à zéro.")
 	}
-	var baseUnit string
 	var fractional bool
 	var status string
 	if err := tx.QueryRow(ctx, `
-		SELECT base_unit, allow_fractional, status FROM products WHERE id = $1
-	`, line.ProductID).Scan(&baseUnit, &fractional, &status); err != nil {
+		SELECT allow_fractional, status FROM products WHERE id = $1
+	`, line.ProductID).Scan(&fractional, &status); err != nil {
 		return resolvedLine{}, domain.NotFound("Article introuvable.")
 	}
 	if status != "active" {
 		return resolvedLine{}, domain.FailedPrecondition("product_archived", "Cet article est archivé et ne peut plus être vendu.")
 	}
-	if !fractional && !line.Quantity.Equal(line.Quantity.Truncate(0)) {
-		return resolvedLine{}, domain.Invalid("quantity", "Cet article n'accepte pas les quantités fractionnaires.")
-	}
 	var unitID uuid.UUID
 	var factor pgtype.Numeric
+	var active bool
 	if err := tx.QueryRow(ctx, `
-		SELECT id, factor FROM product_units WHERE product_id = $1 AND name = $2
-	`, line.ProductID, line.UnitName).Scan(&unitID, &factor); err != nil {
+		SELECT id, factor, active FROM product_units WHERE product_id = $1 AND name = $2
+	`, line.ProductID, line.UnitName).Scan(&unitID, &factor, &active); err != nil {
 		return resolvedLine{}, domain.NotFound("Conditionnement introuvable pour cet article.")
+	}
+	if !active {
+		return resolvedLine{}, domain.FailedPrecondition("unit_archived", "Ce conditionnement est archivé et ne peut plus être vendu.")
+	}
+	if err := soldQuantityAllowed(fractional, line.Quantity); err != nil {
+		return resolvedLine{}, err
 	}
 	factorDec, err := money.FromNum(factor)
 	if err != nil {
@@ -366,6 +369,7 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	if err := tx.QueryRow(ctx, `
 		SELECT unit_price FROM product_prices
 		WHERE store_id = $1 AND product_id = $2 AND product_unit_id = $3 AND currency = $4
+		  AND archived_at IS NULL
 		FOR UPDATE
 	`, storeID, line.ProductID, unitID, currency).Scan(&price); err != nil {
 		return resolvedLine{}, domain.NotFound("Aucun prix n'est défini pour cet article dans cette boutique et cette devise.")
@@ -461,10 +465,7 @@ func lockCashSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, role st
 	if gotStore != storeID || status != "open" {
 		return domain.FailedPrecondition("cash_session", "La session de caisse n'est pas ouverte dans cette boutique.")
 	}
-	if role == "cashier" && openedBy != p.UserID {
-		return domain.PermissionDenied("cash_session", "Vous ne pouvez encaisser que sur la session que vous avez ouverte.")
-	}
-	return nil
+	return denyForeignDrawer(role, openedBy, p.UserID, "Vous ne pouvez encaisser que sur la session que vous avez ouverte.")
 }
 
 func allocateNets(grosses []decimal.Decimal, discount decimal.Decimal) []decimal.Decimal {

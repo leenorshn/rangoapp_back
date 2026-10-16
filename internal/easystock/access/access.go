@@ -57,7 +57,7 @@ var rolePerms = map[string]map[string]struct{}{
 	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
 	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
 	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
-	"seller":             permSet(SalesCreate),
+	"seller":             permSet(SalesCreate, CashOpen, CashClose),
 	"cashier":            permSet(SalesCreate, CashOpen, CashClose, DebtsCollect),
 	"stockkeeper":        permSet(StockReceive, StockAdjust, ReportsRead),
 	"accountant":         permSet(ReportsRead, ReportsExport, MarginsRead),

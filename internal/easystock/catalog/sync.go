@@ -4,44 +4,25 @@ import (
 	"context"
 	"time"
 
-	"rangoapp/internal/easystock/db/dbsql"
+	"rangoapp/internal/easystock/tenant"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
-
-// Change is one catalog row newer than a sync cursor.
-type Change struct {
-	ID        uuid.UUID
-	SKU       string
-	Name      string
-	BaseUnit  string
-	Status    string
-	UpdatedAt time.Time
-	Archived  bool
-}
 
 // Changes returns products after the cursor, ordered by update time then id.
 // The caller sets the tenant on the transaction. Archived products stay in the result.
-func Changes(ctx context.Context, tx pgx.Tx, after time.Time, afterID uuid.UUID, limit int) ([]Change, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 100
-	}
-	rows, err := dbsql.New(tx).ListCatalogChanges(ctx, dbsql.ListCatalogChangesParams{
-		After:    pgtype.Timestamptz{Time: after, Valid: true},
-		AfterID:  afterID,
-		RowLimit: int32(limit),
-	})
-	if err != nil {
+// Without a store, a price edit does not move the cursor: prices belong to one boutique.
+func Changes(ctx context.Context, tx pgx.Tx, after time.Time, afterID uuid.UUID, limit int) ([]Product, error) {
+	return changes(ctx, tx, after, afterID, uuid.Nil, limit)
+}
+
+// ChangesForStore is Changes plus that boutique's prices.
+// The cursor uses the later of the product edit and that store's price edit,
+// so another boutique is not notified of a price it does not sell.
+func ChangesForStore(ctx context.Context, tx pgx.Tx, p tenant.Principal, after time.Time, afterID, storeID uuid.UUID, limit int) ([]Product, error) {
+	if err := requireRead(ctx, tx, p, storeID); err != nil {
 		return nil, err
 	}
-	out := make([]Change, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, Change{
-			ID: row.ID, SKU: row.Sku, Name: row.Name, BaseUnit: row.BaseUnit, Status: row.Status,
-			UpdatedAt: row.UpdatedAt.Time, Archived: row.Archived,
-		})
-	}
-	return out, nil
+	return changes(ctx, tx, after, afterID, storeID, limit)
 }

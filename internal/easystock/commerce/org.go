@@ -3,8 +3,12 @@ package commerce
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
+	"time"
 
 	"rangoapp/internal/easystock/access"
+	"rangoapp/internal/easystock/catalog"
 	"rangoapp/internal/easystock/domain"
 	"rangoapp/internal/easystock/money"
 	"rangoapp/internal/easystock/tenant"
@@ -29,18 +33,35 @@ type ProductCreated struct {
 	UnitID    uuid.UUID
 }
 
-func (s *Service) CreateStore(ctx context.Context, p tenant.Principal, name, timezone string) (uuid.UUID, error) {
-	var id uuid.UUID
+// Store is a boutique the caller can work in, with its principal cash register.
+type Store struct {
+	ID           uuid.UUID
+	Name         string
+	Timezone     string
+	RegisterID   uuid.UUID
+	RegisterName string
+}
+
+func (s *Service) CreateStore(ctx context.Context, p tenant.Principal, name, timezone string) (Store, error) {
+	var created Store
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
 		decision, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, nil, access.StoresManage)
 		if err != nil {
 			return err
 		}
+		name = strings.TrimSpace(name)
+		timezone = strings.TrimSpace(timezone)
 		if name == "" {
 			return domain.Invalid("store", "Indiquez le nom de la boutique.")
 		}
 		if timezone == "" {
 			timezone = "Africa/Lubumbashi"
+		}
+		if len(timezone) > 64 {
+			return domain.Invalid("timezone", "Le fuseau horaire est trop long.")
+		}
+		if _, err := time.LoadLocation(timezone); err != nil {
+			return domain.Invalid("timezone", "Le fuseau horaire n'est pas reconnu.")
 		}
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM stores WHERE archived_at IS NULL`).Scan(&count); err != nil {
@@ -49,7 +70,8 @@ func (s *Service) CreateStore(ctx context.Context, p tenant.Principal, name, tim
 		if count >= decision.MaxStores {
 			return domain.FailedPrecondition("quota_stores", "Cette offre ne permet pas d'ajouter une boutique. Les boutiques existantes sont conservées.")
 		}
-		id = uuid.New()
+		id := uuid.New()
+		registerID := uuid.New()
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stores (id, company_id, name, timezone) VALUES ($1,$2,$3,$4)
 		`, id, p.CompanyID, name, timezone); err != nil {
@@ -57,95 +79,111 @@ func (s *Service) CreateStore(ctx context.Context, p tenant.Principal, name, tim
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cash_registers (id, company_id, store_id, name) VALUES ($1,$2,$3,'Caisse principale')
-		`, uuid.New(), p.CompanyID, id); err != nil {
+		`, registerID, p.CompanyID, id); err != nil {
 			return err
 		}
+		created = Store{ID: id, Name: name, Timezone: timezone, RegisterID: registerID, RegisterName: "Caisse principale"}
 		return audit(ctx, tx, p, &id, "store.create", "store", id, map[string]string{"name": name})
 	})
-	return id, err
+	if err != nil {
+		return Store{}, err
+	}
+	return created, nil
 }
 
-func (s *Service) CreateProduct(ctx context.Context, p tenant.Principal, in CreateProductInput) (ProductCreated, error) {
-	var created ProductCreated
+// Stores lists the boutiques of the caller's company. The owner and the
+// organization admin see every open boutique. Everyone else sees only the
+// boutiques they are assigned to.
+func (s *Service) Stores(ctx context.Context, p tenant.Principal) ([]Store, error) {
+	var out []Store
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
-		decision, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, nil, access.CatalogManage)
+		var role, status string
+		err := tx.QueryRow(ctx, `
+			SELECT org_role, status FROM organization_memberships WHERE user_id = $1
+		`, p.UserID).Scan(&role, &status)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "active") {
+			return domain.PermissionDenied("membership", "Vous n'êtes pas membre actif de cette entreprise.")
+		}
 		if err != nil {
 			return err
 		}
-		if decision.Role == "store_manager" {
-			var n int
-			if err := tx.QueryRow(ctx, `SELECT count(*) FROM store_assignments WHERE user_id = $1`, p.UserID).Scan(&n); err != nil || n == 0 {
-				return domain.PermissionDenied("store", "Affectez d'abord le responsable à une boutique.")
-			}
+		query := `
+			SELECT s.id, s.name, s.timezone, r.id, r.name
+			FROM stores s
+			LEFT JOIN LATERAL (
+				SELECT id, name
+				FROM cash_registers
+				WHERE store_id = s.id AND archived_at IS NULL
+				ORDER BY created_at, id
+				LIMIT 1
+			) r ON true
+			WHERE s.archived_at IS NULL
+		`
+		args := []any{}
+		if role != "owner" && role != "organization_admin" {
+			query += ` AND EXISTS (
+				SELECT 1 FROM store_assignments a
+				WHERE a.store_id = s.id AND a.user_id = $1
+			)`
+			args = append(args, p.UserID)
 		}
-		if in.SKU == "" || in.Name == "" || in.BaseUnit == "" {
-			return domain.Invalid("product", "Indiquez le nom, le SKU et l'unité de base.")
-		}
-		created.ProductID = uuid.New()
-		created.UnitID = uuid.New()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO products (
-				id, company_id, sku, name, category, base_unit, barcode, allow_fractional, alert_threshold, status
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active')
-		`, created.ProductID, p.CompanyID, in.SKU, in.Name, blankNull(in.Category), in.BaseUnit, blankNull(in.Barcode), in.AllowFractional, money.Num(in.AlertThreshold)); err != nil {
-			return domain.AlreadyExists("Ce SKU existe déjà.")
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO product_units (id, company_id, product_id, name, factor, is_base)
-			VALUES ($1,$2,$3,$4,1,true)
-		`, created.UnitID, p.CompanyID, created.ProductID, in.BaseUnit); err != nil {
+		query += ` ORDER BY s.name, s.id`
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
 			return err
 		}
-		return audit(ctx, tx, p, nil, "catalog.product", "product", created.ProductID, map[string]string{"sku": in.SKU})
+		defer rows.Close()
+		for rows.Next() {
+			var item Store
+			var registerID *uuid.UUID
+			var registerName *string
+			if err := rows.Scan(&item.ID, &item.Name, &item.Timezone, &registerID, &registerName); err != nil {
+				return err
+			}
+			if registerID != nil {
+				item.RegisterID = *registerID
+			}
+			if registerName != nil {
+				item.RegisterName = *registerName
+			}
+			out = append(out, item)
+		}
+		return rows.Err()
 	})
-	return created, err
+	return out, err
+}
+
+func (s *Service) CreateProduct(ctx context.Context, p tenant.Principal, in CreateProductInput) (ProductCreated, error) {
+	product, err := s.CreateCatalogProduct(ctx, p, catalog.CreateInput{
+		SKU: in.SKU, Name: in.Name, CategoryName: in.Category, BaseUnit: in.BaseUnit,
+		Barcode: in.Barcode, AllowFractional: in.AllowFractional, AlertThreshold: in.AlertThreshold,
+	})
+	if err != nil {
+		return ProductCreated{}, err
+	}
+	created := ProductCreated{ProductID: product.ID}
+	for _, unit := range product.Units {
+		if unit.IsBase {
+			created.UnitID = unit.ID
+		}
+	}
+	return created, nil
 }
 
 func (s *Service) AddProductUnit(ctx context.Context, p tenant.Principal, productID uuid.UUID, name string, factor decimal.Decimal) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, nil, access.CatalogManage); err != nil {
-			return err
-		}
-		if name == "" || !factor.IsPositive() {
-			return domain.Invalid("unit", "Indiquez le nom du conditionnement et un facteur supérieur à zéro.")
-		}
-		id = uuid.New()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO product_units (id, company_id, product_id, name, factor, is_base)
-			VALUES ($1,$2,$3,$4,$5,false)
-		`, id, p.CompanyID, productID, name, money.Num(factor)); err != nil {
-			return domain.AlreadyExists("Ce conditionnement existe déjà.")
-		}
-		return nil
-	})
-	return id, err
+	unit, err := s.CreateCatalogUnit(ctx, p, productID, catalog.UnitInput{Name: name, Factor: factor, HasFactor: true})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return unit.ID, nil
 }
 
 func (s *Service) SetPrice(ctx context.Context, p tenant.Principal, storeID, productID uuid.UUID, unitName, currency string, unitPrice decimal.Decimal) error {
-	return s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, &storeID, access.CatalogManage); err != nil {
-			return err
-		}
-		if !validCurrency(currency) || unitPrice.IsNegative() {
-			return domain.Invalid("price", "Indiquez une devise et un prix positif ou nul.")
-		}
-		var unitID uuid.UUID
-		if err := tx.QueryRow(ctx, `
-			SELECT id FROM product_units WHERE product_id = $1 AND name = $2
-		`, productID, unitName).Scan(&unitID); err != nil {
-			return domain.NotFound("Conditionnement introuvable.")
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO product_prices (id, company_id, store_id, product_id, product_unit_id, currency, unit_price)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)
-			ON CONFLICT (company_id, store_id, product_id, product_unit_id, currency)
-			DO UPDATE SET unit_price = EXCLUDED.unit_price
-		`, uuid.New(), p.CompanyID, storeID, productID, unitID, currency, money.Num(money.Round(unitPrice))); err != nil {
-			return err
-		}
-		return audit(ctx, tx, p, &storeID, "catalog.price", "product", productID, map[string]string{"currency": currency, "unitPrice": unitPrice.String()})
+	amount := unitPrice
+	_, err := s.UpsertCatalogPrice(ctx, p, catalog.PriceInput{
+		StoreID: storeID, ProductID: productID, UnitName: unitName, Currency: currency, Amount: &amount,
 	})
+	return err
 }
 
 type CustomerInput struct {

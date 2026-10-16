@@ -47,6 +47,7 @@ func authAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 					"companyName": &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 					"role":        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 					"status":      &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+					"storeIds":    &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(graphql.ID)))},
 				},
 			}))))},
 		},
@@ -74,34 +75,35 @@ func authAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			"status":             &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"mustChangePassword": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
 			"phoneVerified":      &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"storeIds":           &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(graphql.ID)))},
 		},
 	})
 	subType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "OrganizationSubscription",
 		Fields: graphql.Fields{
-			"companyId":         &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"companyName":       &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"role":              &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"lifecycle":         &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"status":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"planCode":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"planName":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"amount":            &graphql.Field{Type: graphql.String},
-			"currency":          &graphql.Field{Type: graphql.String},
-			"durationMonths":    &graphql.Field{Type: graphql.Int},
-			"expiresAt":         &graphql.Field{Type: graphql.DateTime},
-			"timezone":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"message":           &graphql.Field{Type: graphql.String},
-			"banner":            &graphql.Field{Type: graphql.String},
-			"canDeclarePayment": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"renewalReference":  &graphql.Field{Type: graphql.String},
-			"operatorName":      &graphql.Field{Type: graphql.String},
-			"destinationAccount": &graphql.Field{Type: graphql.String},
-			"beneficiaryName":   &graphql.Field{Type: graphql.String},
+			"companyId":           &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"companyName":         &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"role":                &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"lifecycle":           &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"status":              &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"planCode":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"planName":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"amount":              &graphql.Field{Type: graphql.String},
+			"currency":            &graphql.Field{Type: graphql.String},
+			"durationMonths":      &graphql.Field{Type: graphql.Int},
+			"expiresAt":           &graphql.Field{Type: graphql.DateTime},
+			"timezone":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"message":             &graphql.Field{Type: graphql.String},
+			"banner":              &graphql.Field{Type: graphql.String},
+			"canDeclarePayment":   &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"renewalReference":    &graphql.Field{Type: graphql.String},
+			"operatorName":        &graphql.Field{Type: graphql.String},
+			"destinationAccount":  &graphql.Field{Type: graphql.String},
+			"beneficiaryName":     &graphql.Field{Type: graphql.String},
 			"paymentInstructions": &graphql.Field{Type: graphql.String},
-			"paymentStatus":     &graphql.Field{Type: graphql.String},
-			"paymentReason":     &graphql.Field{Type: graphql.String},
-			"newExpiresAt":      &graphql.Field{Type: graphql.DateTime},
+			"paymentStatus":       &graphql.Field{Type: graphql.String},
+			"paymentReason":       &graphql.Field{Type: graphql.String},
+			"newExpiresAt":        &graphql.Field{Type: graphql.DateTime},
 		},
 	})
 	paymentType := graphql.NewObject(graphql.ObjectConfig{
@@ -142,7 +144,7 @@ func authAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			for _, company := range profile.Companies {
 				companies = append(companies, map[string]any{
 					"companyId": company.CompanyID.String(), "companyName": company.CompanyName,
-					"role": company.Role, "status": company.Status,
+					"role": company.Role, "status": company.Status, "storeIds": idList(company.StoreIDs),
 				})
 			}
 			return map[string]any{
@@ -191,11 +193,7 @@ func authAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			}
 			out := make([]map[string]any, 0, len(rows))
 			for _, row := range rows {
-				out = append(out, map[string]any{
-					"userId": row.UserID.String(), "fullName": row.FullName, "phone": row.Phone,
-					"role": row.Role, "status": row.Status, "mustChangePassword": row.MustChangePassword,
-					"phoneVerified": row.PhoneVerified,
-				})
+				out = append(out, employeeMap(row))
 			}
 			return out, nil
 		}},
@@ -279,7 +277,7 @@ func authAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 		}},
 	}
 	mutations := graphql.Fields{
-		"requestOwnerSignupOtp": otpRequest(deps, authn.PurposeSignup),
+		"requestOwnerSignupOtp":   otpRequest(deps, authn.PurposeSignup),
 		"requestPasswordResetOtp": otpRequest(deps, authn.PurposeReset),
 		"verifyOwnerSignupOtp":    otpVerify(deps, authn.PurposeSignup),
 		"verifyPasswordResetOtp":  otpVerify(deps, authn.PurposeReset),
@@ -455,11 +453,7 @@ func authAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 				if err != nil {
 					return nil, err
 				}
-				return map[string]any{
-					"userId": row.UserID.String(), "fullName": row.FullName, "phone": row.Phone,
-					"role": row.Role, "status": row.Status, "mustChangePassword": row.MustChangePassword,
-					"phoneVerified": row.PhoneVerified,
-				}, nil
+				return employeeMap(row), nil
 			},
 		},
 		"updateEmployeeRole": &graphql.Field{
@@ -731,6 +725,22 @@ func otpVerify(deps Deps, purpose string) *graphql.Field {
 			return deps.Auth.VerifyOTP(p.Context, purpose, str(p.Args["phone"]), str(p.Args["code"]))
 		},
 	}
+}
+
+func employeeMap(row authn.Employee) map[string]any {
+	return map[string]any{
+		"userId": row.UserID.String(), "fullName": row.FullName, "phone": row.Phone,
+		"role": row.Role, "status": row.Status, "mustChangePassword": row.MustChangePassword,
+		"phoneVerified": row.PhoneVerified, "storeIds": idList(row.StoreIDs),
+	}
+}
+
+func idList(ids []uuid.UUID) []any {
+	out := make([]any, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
 }
 
 func employeeStatus(deps Deps, reactivate bool) *graphql.Field {

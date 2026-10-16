@@ -2,7 +2,9 @@ version: "2"
 sql:
   - engine: postgresql
     queries: internal/easystock/db/query
-    schema: internal/easystock/migrate/sql/000001_schema.up.sql
+    schema:
+      - internal/easystock/migrate/sql/000001_schema.up.sql
+      - internal/easystock/migrate/sql/000006_catalog.up.sql
     gen:
       go:
         package: dbsql

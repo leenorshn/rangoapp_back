@@ -272,6 +272,16 @@ type Product struct {
 	ArchivedAt      pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+	Description     *string
+	CategoryID      pgtype.UUID
+}
+
+type ProductCategory struct {
+	ID        uuid.UUID
+	CompanyID uuid.UUID
+	Name      string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
 }
 
 type ProductPrice struct {
@@ -283,6 +293,7 @@ type ProductPrice struct {
 	Currency      string
 	UnitPrice     string
 	UpdatedAt     pgtype.Timestamptz
+	ArchivedAt    pgtype.Timestamptz
 }
 
 type ProductUnit struct {
@@ -293,6 +304,9 @@ type ProductUnit struct {
 	Factor    string
 	IsBase    bool
 	CreatedAt pgtype.Timestamptz
+	Barcode   *string
+	Active    bool
+	UpdatedAt pgtype.Timestamptz
 }
 
 type ProjectionVersion struct {

@@ -257,10 +257,11 @@ func TestCashCloseIsImmutable(t *testing.T) {
 	if err == nil {
 		t.Fatal("closed session accepted an update")
 	}
-	next, err := svc.OpenCashSession(ctx, w.p, commerce.OpenCashInput{RegisterID: w.register})
+	opened, err := svc.OpenCashSession(ctx, w.p, commerce.OpenCashInput{RegisterID: w.register})
 	if err != nil {
 		t.Fatal(err)
 	}
+	next := opened.ID
 	if err := svc.AdjustCash(ctx, w.p, commerce.CashAdjustmentInput{
 		SessionID: next, Currency: "USD", Direction: "out", Amount: money.Must("1"),
 		Reason: "correction", ReferenceSessionID: w.session,

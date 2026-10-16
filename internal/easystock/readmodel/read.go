@@ -118,12 +118,38 @@ type CashRegister struct {
 	OpenSession *CashSession
 }
 
-// CashSession is the open drawer. Balances is nil when the caller cannot see the amounts.
-type CashSession struct {
+// CashMovement is one drawer line. Currencies are never added together.
+type CashMovement struct {
 	ID        uuid.UUID
-	OpenedAt  time.Time
-	Balances  []Money
-	AmountsOK bool
+	Currency  string
+	Direction string
+	Kind      string
+	Amount    string
+	CreatedBy uuid.UUID
+	CreatedAt time.Time
+}
+
+// CashSession is one drawer session.
+// Money slices are nil when the caller cannot see the amounts.
+// Balances is the theoretical balance per currency: opening + entries - exits.
+type CashSession struct {
+	ID           uuid.UUID
+	StoreID      uuid.UUID
+	RegisterID   uuid.UUID
+	OpenedBy     uuid.UUID
+	ClosedBy     *uuid.UUID
+	OpenedAt     time.Time
+	ClosedAt     *time.Time
+	Status       string
+	Note         string
+	Balances     []Money
+	Opening      []Money
+	TotalIn      []Money
+	TotalOut     []Money
+	Counted      []Money
+	Variances    []Money
+	Transactions []CashMovement
+	AmountsOK    bool
 }
 
 // Counts reports how far signup has gone.
@@ -434,7 +460,7 @@ func (s *Service) Cash(ctx context.Context, p tenant.Principal, storeID uuid.UUI
 		}
 		seeAll := access.RoleAllows(decision.Role, access.ReportsRead)
 		rows, err := tx.Query(ctx, `
-			SELECT r.id, r.name, s.id, s.opened_at, s.opened_by
+			SELECT r.id, r.name, s.id, s.opened_at, s.opened_by, s.close_note
 			FROM cash_registers r
 			LEFT JOIN cash_sessions s
 			  ON s.register_id = r.id AND s.company_id = r.company_id AND s.status = 'open'
@@ -445,61 +471,33 @@ func (s *Service) Cash(ctx context.Context, p tenant.Principal, storeID uuid.UUI
 			return err
 		}
 		defer rows.Close()
+		visible := make([]*CashSession, 0)
 		for rows.Next() {
 			var item CashRegister
 			var sessionID *uuid.UUID
 			var openedAt *time.Time
 			var openedBy *uuid.UUID
-			if err := rows.Scan(&item.ID, &item.Name, &sessionID, &openedAt, &openedBy); err != nil {
+			var note *string
+			if err := rows.Scan(&item.ID, &item.Name, &sessionID, &openedAt, &openedBy, &note); err != nil {
 				return err
 			}
 			if sessionID != nil && openedAt != nil && openedBy != nil {
-				item.OpenSession = &CashSession{ID: *sessionID, OpenedAt: *openedAt, AmountsOK: seeAll || *openedBy == p.UserID}
+				session := &CashSession{
+					ID: *sessionID, StoreID: storeID, RegisterID: item.ID, OpenedBy: *openedBy,
+					OpenedAt: *openedAt, Status: "open", AmountsOK: seeAll || *openedBy == p.UserID,
+				}
+				if note != nil && session.AmountsOK {
+					session.Note = *note
+				}
+				item.OpenSession = session
+				visible = append(visible, session)
 			}
 			out = append(out, item)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		for i := range out {
-			session := out[i].OpenSession
-			if session == nil || !session.AmountsOK {
-				continue
-			}
-			balances, err := tx.Query(ctx, `
-				SELECT currency, COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0)
-				FROM cash_transactions
-				WHERE session_id = $1
-				GROUP BY currency
-				ORDER BY currency
-			`, session.ID)
-			if err != nil {
-				return err
-			}
-			for balances.Next() {
-				var amount Money
-				var value pgtype.Numeric
-				if err := balances.Scan(&amount.Currency, &value); err != nil {
-					balances.Close()
-					return err
-				}
-				amount.Amount, err = numText(value)
-				if err != nil {
-					balances.Close()
-					return err
-				}
-				session.Balances = append(session.Balances, amount)
-			}
-			if err := balances.Err(); err != nil {
-				balances.Close()
-				return err
-			}
-			balances.Close()
-			if session.Balances == nil {
-				session.Balances = []Money{}
-			}
-		}
-		return nil
+		return attachCashFacts(ctx, tx, visible)
 	})
 	return out, err
 }

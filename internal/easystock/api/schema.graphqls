@@ -4,7 +4,11 @@
 
 type Query {
   subscription: Subscription!
-  catalogChanges(after: DateTime, afterId: ID, limit: Int): [CatalogChange!]!
+  products(storeId: ID, search: String, categoryId: ID, after: DateTime, afterId: ID, limit: Int): [Product!]!
+  product(id: ID!, storeId: ID): Product!
+  productByBarcode(storeId: ID!, barcode: String!): Product!
+  productCategories: [ProductCategory!]!
+  catalogChanges(after: DateTime, afterId: ID, limit: Int, storeId: ID): [CatalogChange!]!
   registration: Registration!
   invitations: [Invitation!]!
   sales(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [Sale!]!
@@ -12,10 +16,14 @@ type Query {
   debts(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [Debt!]!
   stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
   cash(storeId: ID!): [CashRegister!]!
+  cashSession(id: ID!): CashSession!
+  cashSessions(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [CashSession!]!
+  cashTransactions(sessionId: ID!, after: DateTime, afterId: ID, limit: Int): [CashTransaction!]!
   reports(storeId: ID, currency: String!, from: DateTime!, to: DateTime!): ShopReport!
   me: Me!
   mySessions: [DeviceSession!]!
   employees: [Employee!]!
+  stores: [Store!]!
   myOrganizationSubscription: OrganizationSubscription!
   renewalInstructions: OrganizationSubscription!
   mySubscriptionPaymentRequests: [SubscriptionPayment!]!
@@ -25,7 +33,18 @@ type Query {
 
 type Mutation {
   confirmSale(input: ConfirmSaleInput!): SaleResult!
+  openCashSession(input: OpenCashSessionInput!): CashSession!
+  closeCashSession(input: CloseCashSessionInput!): CashSession!
+  createProduct(input: ProductInput!): Product!
+  updateProduct(id: ID!, input: ProductInput!): Product!
+  archiveProduct(id: ID!): Product!
+  createProductUnit(productId: ID!, input: ProductUnitInput!): ProductUnit!
+  updateProductUnit(id: ID!, input: ProductUnitInput!): ProductUnit!
+  archiveProductUnit(id: ID!): ProductUnit!
+  upsertProductPrice(input: ProductPriceInput!): ProductPrice!
+  archiveProductPrice(id: ID!): Boolean!
   createCompany(input: CreateCompanyInput!): CompanyCreated!
+  createStore(input: CreateStoreInput!): Store!
   inviteMember(input: InviteMemberInput!): Invitation!
   revokeInvitation(id: ID!): Boolean!
   acceptInvitation(token: String!): Membership!
@@ -66,10 +85,100 @@ type CatalogChange {
   id: ID!
   sku: String!
   name: String!
+  description: String
+  category: ProductCategory
+  categoryName: String
+  barcode: String
   baseUnit: String!
+  allowFractional: Boolean!
+  alertThreshold: String!
   status: String!
   updatedAt: DateTime!
   archived: Boolean!
+  units: [ProductUnit!]!
+}
+
+type Product {
+  id: ID!
+  companyId: ID!
+  sku: String!
+  name: String!
+  description: String
+  category: ProductCategory
+  categoryName: String
+  barcode: String
+  baseUnit: String!
+  allowFractional: Boolean!
+  alertThreshold: String!
+  status: String!
+  archived: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  units: [ProductUnit!]!
+  matchedUnitId: ID
+  # Null sans la permission de marge ou sans l'offre qui l'inclut.
+  cost: ProductCost
+}
+
+type ProductCategory {
+  id: ID!
+  name: String!
+}
+
+type ProductUnit {
+  id: ID!
+  productId: ID!
+  name: String!
+  factor: String!
+  barcode: String
+  isBase: Boolean!
+  active: Boolean!
+  prices: [ProductPrice!]!
+}
+
+type ProductPrice {
+  id: ID!
+  storeId: ID!
+  productId: ID!
+  productUnitId: ID!
+  currency: String!
+  unitPrice: String!
+}
+
+type ProductCost {
+  currency: String
+  avgCost: String
+  costComplete: Boolean!
+}
+
+input ProductInput {
+  sku: String
+  name: String
+  description: String
+  categoryId: ID
+  categoryName: String
+  barcode: String
+  baseUnit: String
+  allowFractional: Boolean
+  alertThreshold: String
+  storeId: ID
+  units: [ProductUnitInput!]
+  prices: [ProductPriceInput!]
+}
+
+input ProductUnitInput {
+  name: String!
+  factor: String!
+  barcode: String
+}
+
+input ProductPriceInput {
+  storeId: ID
+  productId: ID
+  productUnitId: ID
+  unitName: String
+  currency: String
+  unitPrice: String
 }
 
 type Registration {
@@ -170,13 +279,40 @@ type StockItem {
 type CashRegister {
   id: ID!
   name: String!
-  openSession: OpenCashSession
+  openSession: CashSession
 }
 
-type OpenCashSession {
+# Session de caisse. Les listes de montants sont nulles si l'appelant ne peut pas les voir.
+# balances et theoreticalBalances sont le même solde par devise : initial + entrées - sorties.
+# USD et CDF ne sont jamais additionnés.
+type CashSession {
   id: ID!
+  storeId: ID!
+  cashRegisterId: ID!
+  openedBy: ID!
+  closedBy: ID
   openedAt: DateTime!
+  closedAt: DateTime
+  status: String!
+  openingBalances: [MoneyAmount!]
+  totalIn: [MoneyAmount!]
+  totalOut: [MoneyAmount!]
   balances: [MoneyAmount!]
+  theoreticalBalances: [MoneyAmount!]
+  countedBalances: [MoneyAmount!]
+  variances: [MoneyAmount!]
+  note: String
+  transactions: [CashTransaction!]
+}
+
+type CashTransaction {
+  id: ID!
+  currency: String!
+  direction: String!
+  kind: String!
+  amount: String!
+  createdBy: ID!
+  createdAt: DateTime!
 }
 
 type MoneyAmount {
@@ -245,6 +381,11 @@ input CreateCompanyInput {
   timezone: String
 }
 
+input CreateStoreInput {
+  name: String!
+  timezone: String
+}
+
 input InviteMemberInput {
   email: String!
   role: String!
@@ -258,6 +399,29 @@ input ConfirmSaleInput {
   currency: String!
   lines: [SaleLineInput!]!
   payments: [PaymentInput!]!
+  cashSessionId: ID
+}
+
+input MoneyInput {
+  currency: String!
+  amount: String!
+}
+
+input OpenCashSessionInput {
+  storeId: ID!
+  cashRegisterId: ID!
+  openingBalances: [MoneyInput!]!
+}
+
+input CountedBalanceInput {
+  currency: String!
+  amount: String!
+}
+
+input CloseCashSessionInput {
+  cashSessionId: ID!
+  countedBalances: [CountedBalanceInput!]!
+  note: String
 }
 
 input SaleLineInput {
@@ -312,6 +476,7 @@ type MyCompany {
   companyName: String!
   role: String!
   status: String!
+  storeIds: [ID!]!
 }
 
 type DeviceSession {
@@ -333,6 +498,22 @@ type Employee {
   status: String!
   mustChangePassword: Boolean!
   phoneVerified: Boolean!
+  storeIds: [ID!]!
+}
+
+# Boutiques ouvertes de l'entreprise en session.
+# Le propriétaire et l'administrateur d'organisation les voient toutes.
+# Les autres rôles ne voient que leurs affectations.
+type Store {
+  id: ID!
+  name: String!
+  timezone: String!
+  cashRegister: StoreCashRegister
+}
+
+type StoreCashRegister {
+  id: ID!
+  name: String!
 }
 
 type OrganizationSubscription {

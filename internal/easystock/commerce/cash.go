@@ -2,6 +2,9 @@ package commerce
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"time"
 
 	"rangoapp/internal/easystock/access"
 	"rangoapp/internal/easystock/domain"
@@ -20,8 +23,20 @@ type OpeningAmount struct {
 }
 
 type OpenCashInput struct {
+	StoreID    uuid.UUID
 	RegisterID uuid.UUID
 	Openings   []OpeningAmount
+}
+
+// OpenedCashSession is the drawer created by OpenCashSession.
+type OpenedCashSession struct {
+	ID              uuid.UUID
+	RegisterID      uuid.UUID
+	StoreID         uuid.UUID
+	OpenedBy        uuid.UUID
+	OpenedAt        time.Time
+	Status          string
+	OpeningBalances []OpeningAmount
 }
 
 type CloseCount struct {
@@ -33,6 +48,7 @@ type CloseCount struct {
 type CloseCashInput struct {
 	SessionID uuid.UUID
 	Counts    []CloseCount
+	Note      string
 }
 
 type ExpenseInput struct {
@@ -55,42 +71,64 @@ type CashAdjustmentInput struct {
 	ReferenceSessionID uuid.UUID
 }
 
-func (s *Service) OpenCashSession(ctx context.Context, p tenant.Principal, in OpenCashInput) (uuid.UUID, error) {
-	var id uuid.UUID
+func (s *Service) OpenCashSession(ctx context.Context, p tenant.Principal, in OpenCashInput) (OpenedCashSession, error) {
+	var out OpenedCashSession
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
+		openings, err := normalizeOpenings(in.Openings)
+		if err != nil {
+			return err
+		}
 		var storeID uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT store_id FROM cash_registers WHERE id = $1 AND archived_at IS NULL`, in.RegisterID).Scan(&storeID); err != nil {
+		err := tx.QueryRow(ctx, `
+			SELECT store_id FROM cash_registers WHERE id = $1 AND archived_at IS NULL FOR UPDATE
+		`, in.RegisterID).Scan(&storeID)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.NotFound("Caisse introuvable.")
+		}
+		if err != nil {
+			return err
+		}
+		if in.StoreID != uuid.Nil && in.StoreID != storeID {
+			return domain.NotFound("Caisse introuvable dans cette boutique.")
 		}
 		if _, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, &storeID, access.CashOpen); err != nil {
 			return err
 		}
-		id = uuid.New()
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO cash_sessions (id, company_id, store_id, register_id, opened_by, status)
-			VALUES ($1,$2,$3,$4,$5,'open')
-		`, id, p.CompanyID, storeID, in.RegisterID, p.UserID); err != nil {
+		var existing uuid.UUID
+		err = tx.QueryRow(ctx, `
+			SELECT id FROM cash_sessions WHERE register_id = $1 AND status = 'open'
+		`, in.RegisterID).Scan(&existing)
+		if err == nil {
+			return domain.FailedPrecondition("cash_session_open", "Une session est déjà ouverte sur cette caisse.")
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		for _, opening := range in.Openings {
-			amount := money.Round(opening.Amount)
-			if amount.IsZero() {
-				continue
-			}
-			if !validCurrency(opening.Currency) || amount.IsNegative() {
-				return domain.Invalid("opening", "Le fonds initial doit être positif et libellé dans une devise valide.")
-			}
+		id := uuid.New()
+		var openedAt time.Time
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO cash_sessions (id, company_id, store_id, register_id, opened_by, status)
+			VALUES ($1,$2,$3,$4,$5,'open')
+			RETURNING opened_at
+		`, id, p.CompanyID, storeID, in.RegisterID, p.UserID).Scan(&openedAt); err != nil {
+			return err
+		}
+		for _, opening := range openings {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO cash_transactions (
 					id, company_id, session_id, currency, direction, kind, amount, created_by
 				) VALUES ($1,$2,$3,$4,'in','opening',$5,$6)
-			`, uuid.New(), p.CompanyID, id, opening.Currency, money.Num(amount), p.UserID); err != nil {
+			`, uuid.New(), p.CompanyID, id, opening.Currency, money.Num(opening.Amount), p.UserID); err != nil {
 				return err
 			}
 		}
+		out = OpenedCashSession{
+			ID: id, RegisterID: in.RegisterID, StoreID: storeID, OpenedBy: p.UserID,
+			OpenedAt: openedAt, Status: "open", OpeningBalances: openings,
+		}
 		return audit(ctx, tx, p, &storeID, "cash.open", "cash_session", id, map[string]string{"registerId": in.RegisterID.String()})
 	})
-	return id, err
+	return out, err
 }
 
 func (s *Service) CloseCashSession(ctx context.Context, p tenant.Principal, in CloseCashInput) error {
@@ -110,8 +148,12 @@ func (s *Service) CloseCashSession(ctx context.Context, p tenant.Principal, in C
 		if status != "open" {
 			return domain.FailedPrecondition("cash_session_closed", "Cette session est déjà clôturée.")
 		}
-		if decision.Role == "cashier" && openedBy != p.UserID {
-			return domain.PermissionDenied("cash_session", "Vous ne pouvez clôturer que votre propre session.")
+		if err := denyForeignDrawer(decision.Role, openedBy, p.UserID, "Vous ne pouvez clôturer que votre propre session."); err != nil {
+			return err
+		}
+		note := strings.TrimSpace(in.Note)
+		if len([]rune(note)) > 500 {
+			return domain.Invalid("note", "La note de clôture est trop longue.")
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT currency, COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0)
@@ -142,17 +184,24 @@ func (s *Service) CloseCashSession(ctx context.Context, p tenant.Principal, in C
 			if !validCurrency(count.Currency) {
 				return domain.Invalid("currency", "Indiquez une devise valide pour le comptage.")
 			}
+			if seen[count.Currency] {
+				return domain.Invalid("count", "Indiquez une seule fois chaque devise comptée.")
+			}
 			exp := expected[count.Currency]
 			counted := money.Round(count.Counted)
+			if counted.IsNegative() {
+				return domain.Invalid("count", "Le montant compté doit être positif ou nul.")
+			}
 			variance := counted.Sub(exp)
-			if !variance.IsZero() && count.Reason == "" {
-				return domain.Invalid("variance", "Expliquez l'écart entre le montant compté et le montant attendu.")
+			reason := strings.TrimSpace(count.Reason)
+			if reason == "" {
+				reason = note
 			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO cash_session_counts (
 					company_id, session_id, currency, expected_amount, counted_amount, variance, variance_reason
 				) VALUES ($1,$2,$3,$4,$5,$6,$7)
-			`, p.CompanyID, in.SessionID, count.Currency, money.Num(exp), money.Num(counted), money.Num(variance), blankNull(count.Reason)); err != nil {
+			`, p.CompanyID, in.SessionID, count.Currency, money.Num(exp), money.Num(counted), money.Num(variance), blankNull(reason)); err != nil {
 				return err
 			}
 			seen[count.Currency] = true
@@ -162,12 +211,18 @@ func (s *Service) CloseCashSession(ctx context.Context, p tenant.Principal, in C
 				return domain.Invalid("count", "Indiquez le montant compté pour chaque devise mouvementée.")
 			}
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE cash_sessions SET status = 'closed', closed_by = $2, closed_at = now() WHERE id = $1
-		`, in.SessionID, p.UserID); err != nil {
+		tag, err := tx.Exec(ctx, `
+			UPDATE cash_sessions
+			SET status = 'closed', closed_by = $2, closed_at = now(), close_note = $3
+			WHERE id = $1 AND status = 'open'
+		`, in.SessionID, p.UserID, blankNull(note))
+		if err != nil {
 			return err
 		}
-		return audit(ctx, tx, p, &storeID, "cash.close", "cash_session", in.SessionID, map[string]string{})
+		if tag.RowsAffected() != 1 {
+			return domain.FailedPrecondition("cash_session_closed", "Cette session est déjà clôturée.")
+		}
+		return audit(ctx, tx, p, &storeID, "cash.close", "cash_session", in.SessionID, map[string]string{"note": note})
 	})
 }
 
@@ -194,8 +249,8 @@ func (s *Service) AdjustCash(ctx context.Context, p tenant.Principal, in CashAdj
 		if status != "open" {
 			return domain.FailedPrecondition("cash_session", "La correction se fait sur une session ouverte. La session clôturée reste inchangée.")
 		}
-		if decision.Role == "cashier" && openedBy != p.UserID {
-			return domain.PermissionDenied("cash_session", "Vous ne pouvez corriger que votre propre session.")
+		if err := denyForeignDrawer(decision.Role, openedBy, p.UserID, "Vous ne pouvez corriger que votre propre session."); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cash_transactions (
@@ -255,4 +310,34 @@ func (s *Service) CreateExpense(ctx context.Context, p tenant.Principal, in Expe
 		return audit(ctx, tx, p, &in.StoreID, "expense.create", "expense", id, map[string]string{"category": in.Category})
 	})
 	return id, err
+}
+
+func normalizeOpenings(openings []OpeningAmount) ([]OpeningAmount, error) {
+	seen := map[string]struct{}{}
+	out := make([]OpeningAmount, 0, len(openings))
+	for _, opening := range openings {
+		opening.Currency = strings.TrimSpace(opening.Currency)
+		opening.Amount = money.Round(opening.Amount)
+		if !validCurrency(opening.Currency) || opening.Amount.IsNegative() {
+			return nil, domain.Invalid("opening", "Le fonds initial doit être positif ou nul, et libellé dans une devise valide.")
+		}
+		if _, ok := seen[opening.Currency]; ok {
+			return nil, domain.Invalid("opening", "Indiquez une seule fois chaque devise du fonds initial.")
+		}
+		seen[opening.Currency] = struct{}{}
+		out = append(out, opening)
+	}
+	return out, nil
+}
+
+// denyForeignDrawer blocks a cashier or seller from writing on someone else's drawer.
+// A manager, owner or organization admin keeps the close and collection rights of their role.
+func denyForeignDrawer(role string, openedBy, userID uuid.UUID, message string) error {
+	if role != "cashier" && role != "seller" {
+		return nil
+	}
+	if openedBy == userID {
+		return nil
+	}
+	return domain.PermissionDenied("cash_session", message)
 }

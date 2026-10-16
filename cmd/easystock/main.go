@@ -16,7 +16,6 @@ import (
 	"rangoapp/internal/easystock/api"
 	"rangoapp/internal/easystock/authn"
 	"rangoapp/internal/easystock/billing"
-	"rangoapp/internal/easystock/catalog"
 	"rangoapp/internal/easystock/commerce"
 	"rangoapp/internal/easystock/grpcserver"
 	"rangoapp/internal/easystock/identity"
@@ -28,12 +27,10 @@ import (
 	"rangoapp/internal/easystock/reminders"
 	"rangoapp/internal/easystock/reports"
 	"rangoapp/internal/easystock/subscription"
-	"rangoapp/internal/easystock/tenant"
 
 	commercev1 "rangoapp/internal/easystock/gen/commercev1"
 	subscriptionv1 "rangoapp/internal/easystock/gen/subscriptionv1"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -181,24 +178,6 @@ func graphQLHandler(ctx context.Context, identityPool *pgxpool.Pool) http.Handle
 		}
 		deps.Reads = readmodel.New(appPool)
 		deps.Reports = reports.New(appPool)
-		deps.Catalog = func(ctx context.Context, p tenant.Principal, after time.Time, afterID uuid.UUID, limit int) ([]catalog.Change, error) {
-			tx, err := appPool.Begin(ctx)
-			if err != nil {
-				return nil, err
-			}
-			defer tx.Rollback(ctx)
-			if err := tenant.Set(ctx, tx, p); err != nil {
-				return nil, err
-			}
-			rows, err := catalog.Changes(ctx, tx, after, afterID, limit)
-			if err != nil {
-				return nil, err
-			}
-			if err := tx.Commit(ctx); err != nil {
-				return nil, err
-			}
-			return rows, nil
-		}
 	}
 	if addr := os.Getenv("COMMERCE_GRPC_ADDR"); addr != "" {
 		conn := mustCommerceConn(addr)

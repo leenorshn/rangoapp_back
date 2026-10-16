@@ -6,7 +6,6 @@ import (
 
 	"rangoapp/internal/easystock/authn"
 	"rangoapp/internal/easystock/billing"
-	"rangoapp/internal/easystock/catalog"
 	"rangoapp/internal/easystock/commerce"
 	"rangoapp/internal/easystock/contexttoken"
 	"rangoapp/internal/easystock/domain"
@@ -71,15 +70,11 @@ type PlanClient interface {
 	GetSubscription(ctx context.Context, in *subscriptionv1.GetSubscriptionRequest, opts ...grpc.CallOption) (*subscriptionv1.GetSubscriptionResponse, error)
 }
 
-// CatalogFunc reads one page of catalog changes for the caller's company.
-type CatalogFunc func(ctx context.Context, p tenant.Principal, after time.Time, afterID uuid.UUID, limit int) ([]catalog.Change, error)
-
 // Deps wires GraphQL to the internal services. Reads stay in this process.
 // Sale confirmation still goes through Commerce gRPC.
 type Deps struct {
 	Sales         SaleClient
 	Plans         PlanClient
-	Catalog       CatalogFunc
 	Identity      *identity.Service
 	Auth          *authn.Service
 	Billing       *billing.Service
@@ -100,18 +95,6 @@ func Schema(deps Deps) (graphql.Schema, error) {
 			"paidAmount": &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"dueAmount":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"debtId":     &graphql.Field{Type: graphql.ID},
-		},
-	})
-	change := graphql.NewObject(graphql.ObjectConfig{
-		Name: "CatalogChange",
-		Fields: graphql.Fields{
-			"id":        &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"sku":       &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"name":      &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"baseUnit":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"status":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"updatedAt": &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"archived":  &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
 		},
 	})
 	subscription := graphql.NewObject(graphql.ObjectConfig{
@@ -148,6 +131,7 @@ func Schema(deps Deps) (graphql.Schema, error) {
 			"currency":       &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
 			"lines":          &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(lineInput)))},
 			"payments":       &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(paymentInput)))},
+			"cashSessionId":  &graphql.InputObjectFieldConfig{Type: graphql.ID},
 		},
 	})
 	queryFields := graphql.Fields{
@@ -168,59 +152,6 @@ func Schema(deps Deps) (graphql.Schema, error) {
 				return map[string]any{"planCode": view.GetPlanCode(), "status": view.GetStatus(), "source": view.GetSource()}, nil
 			},
 		},
-		"catalogChanges": &graphql.Field{
-			Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(change))),
-			Args: graphql.FieldConfigArgument{
-				"after":   &graphql.ArgumentConfig{Type: graphql.DateTime},
-				"afterId": &graphql.ArgumentConfig{Type: graphql.ID},
-				"limit":   &graphql.ArgumentConfig{Type: graphql.Int},
-			},
-			Resolve: func(p graphql.ResolveParams) (any, error) {
-				member, ok := sessionUser(p.Context)
-				if !ok {
-					return nil, errUnavailable("Authentification requise.")
-				}
-				if err := rejectRestricted(member); err != nil {
-					return nil, err
-				}
-				if member.CompanyID == uuid.Nil {
-					return nil, errUnavailable("Créez ou sélectionnez une entreprise pour continuer.")
-				}
-				if deps.Catalog == nil {
-					return nil, errUnavailable("Catalogue indisponible.")
-				}
-				after, _ := p.Args["after"].(time.Time)
-				afterID := uuid.Nil
-				if raw, _ := p.Args["afterId"].(string); raw != "" {
-					parsed, err := uuid.Parse(raw)
-					if err != nil {
-						return nil, errUnavailable("Curseur invalide.")
-					}
-					afterID = parsed
-				}
-				limit := 100
-				switch value := p.Args["limit"].(type) {
-				case int:
-					limit = value
-				case int32:
-					limit = int(value)
-				case float64:
-					limit = int(value)
-				}
-				rows, err := deps.Catalog(p.Context, member, after, afterID, limit)
-				if err != nil {
-					return nil, err
-				}
-				out := make([]map[string]any, 0, len(rows))
-				for _, row := range rows {
-					out = append(out, map[string]any{
-						"id": row.ID.String(), "sku": row.SKU, "name": row.Name, "baseUnit": row.BaseUnit,
-						"status": row.Status, "updatedAt": row.UpdatedAt, "archived": row.Archived,
-					})
-				}
-				return out, nil
-			},
-		},
 	}
 	authQueries, authMutations := authAPI(deps)
 	for name, field := range authQueries {
@@ -234,7 +165,12 @@ func Schema(deps Deps) (graphql.Schema, error) {
 	for name, field := range fxQueries {
 		queryFields[name] = field
 	}
-	for name, field := range readFields(deps) {
+	readQueries, cashMutations := readFields(deps)
+	for name, field := range readQueries {
+		queryFields[name] = field
+	}
+	catalogQueries, catalogMutations := catalogAPI(deps)
+	for name, field := range catalogQueries {
 		queryFields[name] = field
 	}
 	query := graphql.NewObject(graphql.ObjectConfig{Name: "Query", Fields: queryFields})
@@ -278,6 +214,12 @@ func Schema(deps Deps) (graphql.Schema, error) {
 		mutationFields[name] = field
 	}
 	for name, field := range fxMutations {
+		mutationFields[name] = field
+	}
+	for name, field := range catalogMutations {
+		mutationFields[name] = field
+	}
+	for name, field := range cashMutations {
 		mutationFields[name] = field
 	}
 	mutation := graphql.NewObject(graphql.ObjectConfig{Name: "Mutation", Fields: mutationFields})
@@ -336,6 +278,7 @@ func saleRequest(raw any) (*commercev1.ConfirmSaleRequest, error) {
 			Method: str(payment["method"]), Amount: str(payment["amount"]), ExternalReference: str(payment["externalReference"]),
 		})
 	}
+	req.CashSessionId = str(input["cashSessionId"])
 	if req.IdempotencyKey == "" || len(req.Lines) == 0 {
 		return nil, errUnavailable("La vente doit avoir une clé d'idempotence et au moins une ligne.")
 	}

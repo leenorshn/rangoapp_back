@@ -13,31 +13,62 @@ import (
 )
 
 const listCatalogChanges = `-- name: ListCatalogChanges :many
-SELECT id, sku, name, base_unit, status, updated_at, (archived_at IS NOT NULL)::bool AS archived
-FROM products
-WHERE (updated_at, id) > ($1::timestamptz, $2::uuid)
-ORDER BY updated_at, id
-LIMIT $3
+SELECT company_id, id, sku, name, description, category, category_id, barcode, base_unit,
+       allow_fractional, alert_threshold, status, sync_at AS updated_at, archived
+FROM (
+  SELECT p.company_id, p.id, p.sku, p.name, p.description, p.category, p.category_id, p.barcode,
+         p.base_unit, p.allow_fractional, p.alert_threshold, p.status,
+         CASE
+           WHEN $1::uuid IS NULL THEN p.updated_at
+           ELSE GREATEST(
+             p.updated_at,
+             COALESCE((
+               SELECT max(pp.updated_at)
+               FROM product_prices pp
+               WHERE pp.product_id = p.id
+                 AND pp.store_id = $1::uuid
+             ), p.updated_at)
+           )
+         END::timestamptz AS sync_at,
+         (p.archived_at IS NOT NULL)::bool AS archived
+  FROM products p
+) page
+WHERE (sync_at, id) > ($2::timestamptz, $3::uuid)
+ORDER BY sync_at, id
+LIMIT $4
 `
 
 type ListCatalogChangesParams struct {
+	StoreID  pgtype.UUID
 	After    pgtype.Timestamptz
 	AfterID  uuid.UUID
 	RowLimit int32
 }
 
 type ListCatalogChangesRow struct {
-	ID        uuid.UUID
-	Sku       string
-	Name      string
-	BaseUnit  string
-	Status    string
-	UpdatedAt pgtype.Timestamptz
-	Archived  bool
+	CompanyID       uuid.UUID
+	ID              uuid.UUID
+	Sku             string
+	Name            string
+	Description     *string
+	Category        *string
+	CategoryID      pgtype.UUID
+	Barcode         *string
+	BaseUnit        string
+	AllowFractional bool
+	AlertThreshold  string
+	Status          string
+	UpdatedAt       pgtype.Timestamptz
+	Archived        bool
 }
 
 func (q *Queries) ListCatalogChanges(ctx context.Context, arg ListCatalogChangesParams) ([]ListCatalogChangesRow, error) {
-	rows, err := q.db.Query(ctx, listCatalogChanges, arg.After, arg.AfterID, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listCatalogChanges,
+		arg.StoreID,
+		arg.After,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -46,13 +77,115 @@ func (q *Queries) ListCatalogChanges(ctx context.Context, arg ListCatalogChanges
 	for rows.Next() {
 		var i ListCatalogChangesRow
 		if err := rows.Scan(
+			&i.CompanyID,
 			&i.ID,
 			&i.Sku,
 			&i.Name,
+			&i.Description,
+			&i.Category,
+			&i.CategoryID,
+			&i.Barcode,
 			&i.BaseUnit,
+			&i.AllowFractional,
+			&i.AlertThreshold,
 			&i.Status,
 			&i.UpdatedAt,
 			&i.Archived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPricesForStore = `-- name: ListPricesForStore :many
+SELECT id, store_id, product_id, product_unit_id, currency, unit_price
+FROM product_prices
+WHERE store_id = $1
+  AND archived_at IS NULL
+  AND product_id = ANY($2::uuid[])
+ORDER BY product_unit_id, currency
+`
+
+type ListPricesForStoreParams struct {
+	StoreID    uuid.UUID
+	ProductIds []uuid.UUID
+}
+
+type ListPricesForStoreRow struct {
+	ID            uuid.UUID
+	StoreID       uuid.UUID
+	ProductID     uuid.UUID
+	ProductUnitID uuid.UUID
+	Currency      string
+	UnitPrice     string
+}
+
+func (q *Queries) ListPricesForStore(ctx context.Context, arg ListPricesForStoreParams) ([]ListPricesForStoreRow, error) {
+	rows, err := q.db.Query(ctx, listPricesForStore, arg.StoreID, arg.ProductIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPricesForStoreRow
+	for rows.Next() {
+		var i ListPricesForStoreRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StoreID,
+			&i.ProductID,
+			&i.ProductUnitID,
+			&i.Currency,
+			&i.UnitPrice,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnitsForProducts = `-- name: ListUnitsForProducts :many
+SELECT id, product_id, name, factor, barcode, is_base, active
+FROM product_units
+WHERE product_id = ANY($1::uuid[])
+ORDER BY is_base DESC, name, id
+`
+
+type ListUnitsForProductsRow struct {
+	ID        uuid.UUID
+	ProductID uuid.UUID
+	Name      string
+	Factor    string
+	Barcode   *string
+	IsBase    bool
+	Active    bool
+}
+
+func (q *Queries) ListUnitsForProducts(ctx context.Context, productIds []uuid.UUID) ([]ListUnitsForProductsRow, error) {
+	rows, err := q.db.Query(ctx, listUnitsForProducts, productIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnitsForProductsRow
+	for rows.Next() {
+		var i ListUnitsForProductsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.Name,
+			&i.Factor,
+			&i.Barcode,
+			&i.IsBase,
+			&i.Active,
 		); err != nil {
 			return nil, err
 		}

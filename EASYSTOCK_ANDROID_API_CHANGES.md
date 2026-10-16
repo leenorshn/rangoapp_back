@@ -23,11 +23,15 @@ Champs exposés aujourd’hui : `saleId`, `currency`, `netAmount`, `paidAmount`,
 
 ## Catalogue
 
-`catalogChanges(after, afterId, limit)` pagine par `(updated_at, id)`. Les produits archivés restent dans le flux avec `archived: true` et `status: "archived"`. La page suivante reprend `updatedAt` et `id` du dernier élément.
+Le contrat à intégrer est `EASYSTOCK_CATALOG_ANDROID.md`.
+
+`catalogChanges(after, afterId, limit, storeId)` pagine toujours par `(updatedAt, id)`. Les champs déjà lus restent. Avec `storeId`, le curseur inclut aussi les prix de cette boutique : un changement de prix ne réveille pas les autres boutiques. Les produits archivés restent dans le flux avec `archived: true`.
 
 ## Inscription
 
 Le propriétaire passe par `requestOwnerSignupOtp`, `verifyOwnerSignupOtp`, puis `completeOwnerSignup`. Cela crée l'utilisateur, l'entreprise, le rôle `owner` et l'essai déjà configuré sur l'offre Essentiel. `createCompany` ouvre ensuite la première boutique et sa caisse. L'entreprise de la session vient du serveur. Un `organization_id` envoyé par le client n'est pas une autorisation.
+
+Une boutique supplémentaire passe par `createStore`. Cette mutation n'ouvre pas d'entreprise. `stores` reliste les boutiques de la session : `id`, `name`, `timezone` et `cashRegister` (`id`, `name`). Le propriétaire et l'administrateur d'organisation voient toutes les boutiques ouvertes. Un vendeur ou un gérant ne voit que les siennes. `me.companies[].storeIds` et `employees[].storeIds` portent les affectations. Après réinstallation, l'application relit `stores` et `me` au lieu de rappeler `createCompany`.
 
 Les employés ne reçoivent pas d'invitation. Le propriétaire appelle `createEmployee` avec le rôle `manager` ou `seller` et un mot de passe temporaire. La première connexion a le scope `password_change`.
 
@@ -41,4 +45,4 @@ Les employés ne reçoivent pas d'invitation. Le propriétaire appelle `createEm
 
 ## Pas encore exposés en GraphQL
 
-`payDebt`, les remboursements, l'ouverture et la clôture de caisse, et les achats existent dans le service Go. La dette et le remboursement sont aussi en gRPC interne. Ils ne sont pas encore des mutations du schéma GraphQL.
+`payDebt`, les remboursements et les achats existent dans le service Go. La dette et le remboursement sont aussi en gRPC interne. Ils ne sont pas encore des mutations du schéma GraphQL. L'ouverture, la lecture et la clôture de caisse sont décrites dans `EASYSTOCK_CASH_ANDROID.md`. `confirmSale` accepte `cashSessionId` pour un paiement `cash`.

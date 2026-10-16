@@ -123,15 +123,19 @@ func receiveStock(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Receive
 		if status != "active" {
 			return ReceiveResult{}, domain.FailedPrecondition("product_archived", "Cet article est archivé.")
 		}
-		if !fractional && !input.Quantity.Equal(input.Quantity.Truncate(0)) {
-			return ReceiveResult{}, domain.Invalid("quantity", "Cet article n'accepte pas les quantités fractionnaires.")
-		}
 		var unitID uuid.UUID
 		var factor pgtype.Numeric
+		var active bool
 		if err := tx.QueryRow(ctx, `
-			SELECT id, factor FROM product_units WHERE product_id = $1 AND name = $2
-		`, input.ProductID, input.UnitName).Scan(&unitID, &factor); err != nil {
+			SELECT id, factor, active FROM product_units WHERE product_id = $1 AND name = $2
+		`, input.ProductID, input.UnitName).Scan(&unitID, &factor, &active); err != nil {
 			return ReceiveResult{}, domain.NotFound("Conditionnement introuvable.")
+		}
+		if !active {
+			return ReceiveResult{}, domain.FailedPrecondition("unit_archived", "Ce conditionnement est archivé.")
+		}
+		if err := soldQuantityAllowed(fractional, input.Quantity); err != nil {
+			return ReceiveResult{}, err
 		}
 		factorDec, err := money.FromNum(factor)
 		if err != nil {

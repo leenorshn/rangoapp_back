@@ -79,6 +79,29 @@ func orgAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			"storeId":   &graphql.Field{Type: graphql.ID},
 		},
 	})
+	cashRegister := graphql.NewObject(graphql.ObjectConfig{
+		Name: "StoreCashRegister",
+		Fields: graphql.Fields{
+			"id":   &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"name": &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+		},
+	})
+	storeType := graphql.NewObject(graphql.ObjectConfig{
+		Name: "Store",
+		Fields: graphql.Fields{
+			"id":           &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"name":         &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"timezone":     &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"cashRegister": &graphql.Field{Type: cashRegister},
+		},
+	})
+	storeInput := graphql.NewInputObject(graphql.InputObjectConfig{
+		Name: "CreateStoreInput",
+		Fields: graphql.InputObjectConfigFieldMap{
+			"name":     &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"timezone": &graphql.InputObjectFieldConfig{Type: graphql.String},
+		},
+	})
 	queries := graphql.Fields{
 		"registration": &graphql.Field{
 			Type: graphql.NewNonNull(registration),
@@ -103,6 +126,12 @@ func orgAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 				return invitationMaps(rows, false), nil
 			},
 		},
+		"stores": &graphql.Field{
+			Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(storeType))),
+			Resolve: func(p graphql.ResolveParams) (any, error) {
+				return resolveStores(p, deps)
+			},
+		},
 	}
 	mutations := graphql.Fields{
 		"createCompany": &graphql.Field{
@@ -110,6 +139,13 @@ func orgAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 			Args: graphql.FieldConfigArgument{"input": &graphql.ArgumentConfig{Type: graphql.NewNonNull(companyInput)}},
 			Resolve: func(p graphql.ResolveParams) (any, error) {
 				return resolveCreateCompany(p, deps)
+			},
+		},
+		"createStore": &graphql.Field{
+			Type: graphql.NewNonNull(storeType),
+			Args: graphql.FieldConfigArgument{"input": &graphql.ArgumentConfig{Type: graphql.NewNonNull(storeInput)}},
+			Resolve: func(p graphql.ResolveParams) (any, error) {
+				return resolveCreateStore(p, deps)
 			},
 		},
 		"inviteMember": &graphql.Field{
@@ -228,10 +264,11 @@ func resolveCreateCompany(p graphql.ResolveParams, deps Deps) (any, error) {
 				created.PrimaryCurrency = strings.ToUpper(strings.TrimSpace(str(input["primaryCurrency"])))
 			}
 			if deps.Commerce != nil {
-				storeID, err = deps.Commerce.CreateStore(p.Context, actor, storeName, timezoneOr(timezone))
+				store, err := deps.Commerce.CreateStore(p.Context, actor, storeName, timezoneOr(timezone))
 				if err != nil {
 					return nil, err
 				}
+				storeID = store.ID
 			}
 		} else {
 			storeID = counts.FirstStore
@@ -245,6 +282,54 @@ func resolveCreateCompany(p graphql.ResolveParams, deps Deps) (any, error) {
 		out["storeId"] = storeID.String()
 	}
 	return out, nil
+}
+
+func resolveStores(p graphql.ResolveParams, deps Deps) (any, error) {
+	member, err := requireCompany(p.Context)
+	if err != nil {
+		return nil, err
+	}
+	if deps.Commerce == nil {
+		return nil, errUnavailable("Boutiques indisponibles.")
+	}
+	rows, err := deps.Commerce.Stores(p.Context, member)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, storeMap(row))
+	}
+	return out, nil
+}
+
+func resolveCreateStore(p graphql.ResolveParams, deps Deps) (any, error) {
+	member, err := requireCompany(p.Context)
+	if err != nil {
+		return nil, err
+	}
+	if deps.Commerce == nil {
+		return nil, errUnavailable("Boutiques indisponibles.")
+	}
+	input, _ := p.Args["input"].(map[string]any)
+	if input == nil {
+		return nil, errUnavailable("Boutique illisible.")
+	}
+	created, err := deps.Commerce.CreateStore(p.Context, member, str(input["name"]), str(input["timezone"]))
+	if err != nil {
+		return nil, err
+	}
+	return storeMap(created), nil
+}
+
+func storeMap(row commerce.Store) map[string]any {
+	out := map[string]any{
+		"id": row.ID.String(), "name": row.Name, "timezone": row.Timezone,
+	}
+	if row.RegisterID != uuid.Nil {
+		out["cashRegister"] = map[string]any{"id": row.RegisterID.String(), "name": row.RegisterName}
+	}
+	return out
 }
 
 func resolveInvite(p graphql.ResolveParams, deps Deps) (any, error) {

@@ -50,7 +50,8 @@ func TestConfirmSaleSendsDecimalStringsAndContext(t *testing.T) {
 			"lines": []any{map[string]any{
 				"productId": productID.String(), "unitName": "piece", "quantity": "2", "expectedUnitPrice": "10.00",
 			}},
-			"payments": []any{map[string]any{"method": "cash", "amount": "20.00"}},
+			"payments":      []any{map[string]any{"method": "cash", "amount": "20.00"}},
+			"cashSessionId": uuid.NewString(),
 		},
 	}
 	result := Execute(WithPrincipal(context.Background(), member), schema, query, vars)
@@ -60,12 +61,28 @@ func TestConfirmSaleSendsDecimalStringsAndContext(t *testing.T) {
 	if sales.req.GetIdempotencyKey() != "sale-key" || sales.req.GetLines()[0].GetQuantity() != "2" || sales.req.GetPayments()[0].GetAmount() != "20.00" {
 		t.Fatalf("%+v", sales.req)
 	}
+	if sales.req.GetCashSessionId() == "" {
+		t.Fatal("cash session was not forwarded")
+	}
 	if len(sales.md.Get("x-easystock-context")) != 1 {
 		t.Fatal("missing internal context")
 	}
 	data := result.Data.(map[string]any)["confirmSale"].(map[string]any)
 	if data["saleId"] != "sale-1" || data["netAmount"] != "20.0000" {
 		t.Fatalf("%v", data)
+	}
+}
+
+func TestCreateStoreRequiresACompany(t *testing.T) {
+	schema, err := Schema(Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Execute(WithPrincipal(context.Background(), tenant.Principal{UserID: uuid.New()}), schema, `mutation ($input: CreateStoreInput!) {
+		createStore(input: $input) { id }
+	}`, map[string]any{"input": map[string]any{"name": "Centre"}})
+	if len(result.Errors) == 0 {
+		t.Fatal("createStore opened work without a company")
 	}
 }
 

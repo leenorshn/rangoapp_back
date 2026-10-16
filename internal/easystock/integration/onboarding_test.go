@@ -321,6 +321,120 @@ func decimalEqual(got, want string) bool {
 	return left.Equal(right)
 }
 
+func TestStoresListAndCreateStoreDoNotOpenACompany(t *testing.T) {
+	admin, app, identityPool, _ := testutil.Pools(t)
+	ctx := context.Background()
+	idSvc := identity.New(identityPool)
+	schema, err := api.Schema(api.Deps{
+		Identity: idSvc, Commerce: commerce.New(app), Reads: readmodel.New(app),
+		ContextSecret: "test-secret-test-secret-test-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := idSvc.EnsureUser(ctx, "user_stores", "Awa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := api.WithPrincipal(ctx, tenant.Principal{UserID: userID, RequestID: "stores"})
+	created := api.Execute(session, schema, `mutation ($input: CreateCompanyInput!) {
+		createCompany(input: $input) { companyId storeId }
+	}`, map[string]any{"input": map[string]any{
+		"name": "Kivu", "primaryCurrency": "USD", "storeName": "Centre", "timezone": "Africa/Lubumbashi",
+	}})
+	if len(created.Errors) > 0 {
+		t.Fatal(created.Errors)
+	}
+	body := created.Data.(map[string]any)["createCompany"].(map[string]any)
+	companyID := uuid.MustParse(body["companyId"].(string))
+	storeID := uuid.MustParse(body["storeId"].(string))
+	owner := api.WithPrincipal(ctx, tenant.Principal{UserID: userID, CompanyID: companyID, OrgRole: "owner"})
+	listed := api.Execute(owner, schema, `{ stores { id name timezone cashRegister { id name } } }`, nil)
+	if len(listed.Errors) > 0 {
+		t.Fatal(listed.Errors)
+	}
+	stores := listed.Data.(map[string]any)["stores"].([]any)
+	if len(stores) != 1 {
+		t.Fatalf("%v", stores)
+	}
+	first := stores[0].(map[string]any)
+	if first["id"] != storeID.String() || first["name"] != "Centre" || first["timezone"] != "Africa/Lubumbashi" {
+		t.Fatalf("%v", first)
+	}
+	register, _ := first["cashRegister"].(map[string]any)
+	if register == nil || register["name"] != "Caisse principale" || register["id"] == "" {
+		t.Fatalf("%v", first)
+	}
+	sellerID, err := idSvc.EnsureUser(ctx, "user_stores_seller", "Vendeur")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO organization_memberships (company_id, user_id, org_role, status)
+		VALUES ($1,$2,'seller','active')
+	`, companyID, sellerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO store_assignments (company_id, store_id, user_id) VALUES ($1,$2,$3)
+	`, companyID, storeID, sellerID); err != nil {
+		t.Fatal(err)
+	}
+	seller := api.WithPrincipal(ctx, tenant.Principal{UserID: sellerID, CompanyID: companyID, OrgRole: "seller"})
+	sellerStores := api.Execute(seller, schema, `{ stores { id } }`, nil)
+	if len(sellerStores.Errors) > 0 {
+		t.Fatal(sellerStores.Errors)
+	}
+	seen := sellerStores.Data.(map[string]any)["stores"].([]any)
+	if len(seen) != 1 || seen[0].(map[string]any)["id"] != storeID.String() {
+		t.Fatalf("%v", seen)
+	}
+	denied := api.Execute(seller, schema, `mutation ($input: CreateStoreInput!) {
+		createStore(input: $input) { id }
+	}`, map[string]any{"input": map[string]any{"name": "Annexe"}})
+	if len(denied.Errors) == 0 {
+		t.Fatal("seller opened a store")
+	}
+	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'business' WHERE company_id = $1`, companyID); err != nil {
+		t.Fatal(err)
+	}
+	var companiesBefore int
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM companies WHERE created_by = $1`, userID).Scan(&companiesBefore); err != nil {
+		t.Fatal(err)
+	}
+	second := api.Execute(owner, schema, `mutation ($input: CreateStoreInput!) {
+		createStore(input: $input) { id name timezone cashRegister { name } }
+	}`, map[string]any{"input": map[string]any{"name": "Annexe", "timezone": "Africa/Kinshasa"}})
+	if len(second.Errors) > 0 {
+		t.Fatal(second.Errors)
+	}
+	createdStore := second.Data.(map[string]any)["createStore"].(map[string]any)
+	if createdStore["id"] == storeID.String() || createdStore["name"] != "Annexe" || createdStore["timezone"] != "Africa/Kinshasa" {
+		t.Fatalf("%v", createdStore)
+	}
+	if createdStore["cashRegister"].(map[string]any)["name"] != "Caisse principale" {
+		t.Fatalf("%v", createdStore)
+	}
+	var companiesAfter int
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM companies WHERE created_by = $1`, userID).Scan(&companiesAfter); err != nil || companiesAfter != companiesBefore {
+		t.Fatalf("companies %d -> %d err=%v", companiesBefore, companiesAfter, err)
+	}
+	again := api.Execute(owner, schema, `{ stores { id } }`, nil)
+	if len(again.Errors) > 0 {
+		t.Fatal(again.Errors)
+	}
+	if len(again.Data.(map[string]any)["stores"].([]any)) != 2 {
+		t.Fatalf("%v", again.Data)
+	}
+	sellerAgain := api.Execute(seller, schema, `{ stores { id } }`, nil)
+	if len(sellerAgain.Errors) > 0 {
+		t.Fatal(sellerAgain.Errors)
+	}
+	if len(sellerAgain.Data.(map[string]any)["stores"].([]any)) != 1 {
+		t.Fatal("seller sees a boutique they are not assigned to")
+	}
+}
+
 func TestRegistrationWithoutUser(t *testing.T) {
 	schema, err := api.Schema(api.Deps{})
 	if err != nil {
