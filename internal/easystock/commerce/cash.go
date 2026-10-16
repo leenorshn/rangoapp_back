@@ -79,7 +79,7 @@ func (s *Service) OpenCashSession(ctx context.Context, p tenant.Principal, in Op
 			return err
 		}
 		var storeID uuid.UUID
-		err := tx.QueryRow(ctx, `
+		err = tx.QueryRow(ctx, `
 			SELECT store_id FROM cash_registers WHERE id = $1 AND archived_at IS NULL FOR UPDATE
 		`, in.RegisterID).Scan(&storeID)
 		if errors.Is(err, pgx.ErrNoRows) {
