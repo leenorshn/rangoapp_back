@@ -2,7 +2,18 @@
 -- company, and search indexes for the product and customer pickers.
 -- debts.due_on already exists. New credit sales must fill it in the application.
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- DigitalOcean managed PostgreSQL only allows the admin role to create
+-- extensions. Install pg_trgm once as that admin; this migration then
+-- continues when the extension is already present.
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
+      RAISE EXCEPTION 'pg_trgm must be created by the database admin before this migration';
+    END IF;
+END $$;
 
 ALTER TABLE customers
   ADD COLUMN whatsapp_phone text,
