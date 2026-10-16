@@ -71,7 +71,7 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 	`, id, p.CompanyID, sku, name, blank(description), blank(categoryName), nullableID(categoryID), base, blank(barcode), in.AllowFractional, money.Num(in.AlertThreshold)); err != nil {
 		return Product{}, mapWrite(err)
 	}
-	baseID, err := insertUnit(ctx, tx, p.CompanyID, id, base, decimal.NewFromInt(1), barcode, true)
+	baseID, err := insertUnit(ctx, tx, p.CompanyID, id, base, decimal.NewFromInt(1), barcode, true, true, true, in.AllowFractional)
 	if err != nil {
 		return Product{}, err
 	}
@@ -84,7 +84,8 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 		if _, ok := names[unitName]; ok {
 			return Product{}, domain.AlreadyExists("Ce conditionnement existe déjà.")
 		}
-		unitID, err := insertUnit(ctx, tx, p.CompanyID, id, unitName, unit.Factor, unit.Barcode, false)
+		purchase, sale, fractional := unitSwitches(unit, in.AllowFractional)
+		unitID, err := insertUnit(ctx, tx, p.CompanyID, id, unitName, unit.Factor, unit.Barcode, false, purchase, sale, fractional)
 		if err != nil {
 			return Product{}, err
 		}
@@ -258,6 +259,13 @@ func Update(ctx context.Context, tx pgx.Tx, p tenant.Principal, id uuid.UUID, in
 	`, id, sku, name, description, category, categoryID, barcode, base, fractional, money.Num(alert)); err != nil {
 		return Product{}, mapWrite(err)
 	}
+	if in.AllowFractional != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE product_units SET allow_fractional = $2 WHERE product_id = $1 AND is_base
+		`, id, fractional); err != nil {
+			return Product{}, err
+		}
+	}
 	newBarcode := ""
 	if barcode != nil {
 		newBarcode = *barcode
@@ -325,7 +333,12 @@ func CreateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, productID uu
 	if status != "active" {
 		return Unit{}, domain.FailedPrecondition("product_archived", "Cet article est archivé.")
 	}
-	id, err := insertUnit(ctx, tx, p.CompanyID, productID, in.Name, in.Factor, in.Barcode, false)
+	var productFractional bool
+	if err := tx.QueryRow(ctx, `SELECT allow_fractional FROM products WHERE id = $1`, productID).Scan(&productFractional); err != nil {
+		return Unit{}, err
+	}
+	purchase, sale, fractional := unitSwitches(in, productFractional)
+	id, err := insertUnit(ctx, tx, p.CompanyID, productID, in.Name, in.Factor, in.Barcode, false, purchase, sale, fractional)
 	if err != nil {
 		return Unit{}, err
 	}
@@ -340,12 +353,13 @@ func UpdateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, unitID uuid.
 	var productID uuid.UUID
 	var name string
 	var factorRaw string
-	var isBase, active bool
+	var isBase, active, allowPurchase, allowSale, allowFractional bool
 	var barcode *string
 	err := tx.QueryRow(ctx, `
-		SELECT product_id, name, factor::text, is_base, active, barcode
+		SELECT product_id, name, factor::text, is_base, active, barcode,
+		       allow_purchase, allow_sale, allow_fractional
 		FROM product_units WHERE id = $1 FOR UPDATE
-	`, unitID).Scan(&productID, &name, &factorRaw, &isBase, &active, &barcode)
+	`, unitID).Scan(&productID, &name, &factorRaw, &isBase, &active, &barcode, &allowPurchase, &allowSale, &allowFractional)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Unit{}, domain.NotFound("Conditionnement introuvable.")
 	}
@@ -395,9 +409,20 @@ func UpdateUnit(ctx context.Context, tx pgx.Tx, p tenant.Principal, unitID uuid.
 			return Unit{}, err
 		}
 	}
+	if in.AllowPurchase != nil {
+		allowPurchase = *in.AllowPurchase
+	}
+	if in.AllowSale != nil {
+		allowSale = *in.AllowSale
+	}
+	if in.AllowFractional != nil {
+		allowFractional = *in.AllowFractional
+	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE product_units SET name = $2, factor = $3, barcode = $4 WHERE id = $1
-	`, unitID, nextName, money.Num(nextFactor), blank(nextBarcode)); err != nil {
+		UPDATE product_units
+		SET name = $2, factor = $3, barcode = $4, allow_purchase = $5, allow_sale = $6, allow_fractional = $7
+		WHERE id = $1
+	`, unitID, nextName, money.Num(nextFactor), blank(nextBarcode), allowPurchase, allowSale, allowFractional); err != nil {
 		return Unit{}, mapWrite(err)
 	}
 	if isBase && nextName != name {
@@ -526,7 +551,21 @@ func ArchivePrice(ctx context.Context, tx pgx.Tx, p tenant.Principal, id uuid.UU
 	return nil
 }
 
-func insertUnit(ctx context.Context, tx pgx.Tx, companyID, productID uuid.UUID, name string, factor decimal.Decimal, barcode string, base bool) (uuid.UUID, error) {
+func unitSwitches(in UnitInput, inheritFractional bool) (purchase, sale, fractional bool) {
+	purchase, sale, fractional = true, true, inheritFractional
+	if in.AllowPurchase != nil {
+		purchase = *in.AllowPurchase
+	}
+	if in.AllowSale != nil {
+		sale = *in.AllowSale
+	}
+	if in.AllowFractional != nil {
+		fractional = *in.AllowFractional
+	}
+	return purchase, sale, fractional
+}
+
+func insertUnit(ctx context.Context, tx pgx.Tx, companyID, productID uuid.UUID, name string, factor decimal.Decimal, barcode string, base, purchase, sale, fractional bool) (uuid.UUID, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 40 {
 		return uuid.Nil, domain.Invalid("unit", "Indiquez le nom du conditionnement.")
@@ -543,9 +582,11 @@ func insertUnit(ctx context.Context, tx pgx.Tx, companyID, productID uuid.UUID, 
 		return uuid.Nil, err
 	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO product_units (id, company_id, product_id, name, factor, barcode, is_base, active)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,true)
-	`, id, companyID, productID, name, money.Num(factor), blank(barcode), base)
+		INSERT INTO product_units (
+			id, company_id, product_id, name, factor, barcode, is_base, active,
+			allow_purchase, allow_sale, allow_fractional
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$9,$10)
+	`, id, companyID, productID, name, money.Num(factor), blank(barcode), base, purchase, sale, fractional)
 	if err != nil {
 		return uuid.Nil, mapWrite(err)
 	}

@@ -165,12 +165,16 @@ func Schema(deps Deps) (graphql.Schema, error) {
 	for name, field := range fxQueries {
 		queryFields[name] = field
 	}
-	readQueries, cashMutations := readFields(deps)
+	readQueries, cashMutations, moneyAmount := readFields(deps)
+	stockQueries, stockMutations := stockAPI(deps, moneyAmount)
 	for name, field := range readQueries {
 		queryFields[name] = field
 	}
 	catalogQueries, catalogMutations := catalogAPI(deps)
 	for name, field := range catalogQueries {
+		queryFields[name] = field
+	}
+	for name, field := range stockQueries {
 		queryFields[name] = field
 	}
 	query := graphql.NewObject(graphql.ObjectConfig{Name: "Query", Fields: queryFields})
@@ -220,6 +224,9 @@ func Schema(deps Deps) (graphql.Schema, error) {
 		mutationFields[name] = field
 	}
 	for name, field := range cashMutations {
+		mutationFields[name] = field
+	}
+	for name, field := range stockMutations {
 		mutationFields[name] = field
 	}
 	mutation := graphql.NewObject(graphql.ObjectConfig{Name: "Mutation", Fields: mutationFields})

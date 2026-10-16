@@ -103,12 +103,14 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 	}
 	total := decimal.Zero
 	type item struct {
-		id      uuid.UUID
-		product uuid.UUID
-		qty     decimal.Decimal
-		base    decimal.Decimal
-		restock bool
-		amount  decimal.Decimal
+		id       uuid.UUID
+		product  uuid.UUID
+		unit     uuid.UUID
+		unitName string
+		qty      decimal.Decimal
+		base     decimal.Decimal
+		restock  bool
+		amount   decimal.Decimal
 	}
 	items := make([]item, 0, len(in.Lines))
 	for _, line := range in.Lines {
@@ -116,11 +118,14 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 			return RefundResult{}, domain.Invalid("quantity", "La quantité retournée doit être supérieure à zéro.")
 		}
 		var soldQty, baseQty, lineNet pgtype.Numeric
-		var productID uuid.UUID
+		var productID, unitID uuid.UUID
+		var unitName string
 		if err := tx.QueryRow(ctx, `
-			SELECT product_id, quantity, base_quantity, line_net
-			FROM sale_items WHERE id = $1 AND sale_id = $2
-		`, line.SaleItemID, in.SaleID).Scan(&productID, &soldQty, &baseQty, &lineNet); err != nil {
+			SELECT s.product_id, s.product_unit_id, u.name, s.quantity, s.base_quantity, s.line_net
+			FROM sale_items s
+			JOIN product_units u ON u.id = s.product_unit_id
+			WHERE s.id = $1 AND s.sale_id = $2
+		`, line.SaleItemID, in.SaleID).Scan(&productID, &unitID, &unitName, &soldQty, &baseQty, &lineNet); err != nil {
 			return RefundResult{}, domain.NotFound("Ligne de vente introuvable.")
 		}
 		sold, _ := money.FromNum(soldQty)
@@ -145,7 +150,7 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 			amount = money.Round(netLine.Mul(line.Quantity).Div(sold))
 		}
 		baseBack := base.Mul(line.Quantity).Div(sold)
-		items = append(items, item{id: line.SaleItemID, product: productID, qty: line.Quantity, base: baseBack, restock: line.Restock, amount: amount})
+		items = append(items, item{id: line.SaleItemID, product: productID, unit: unitID, unitName: unitName, qty: line.Quantity, base: baseBack, restock: line.Restock, amount: amount})
 		total = total.Add(amount)
 	}
 	total = money.Round(total)
@@ -215,9 +220,10 @@ func createRefund(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateR
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
-				id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id
-			) VALUES ($1,$2,$3,$4,$5,'refund',$6,'refund',$7,$8)
-		`, uuid.New(), p.CompanyID, storeID, line.product, money.Num(line.base), in.Reason, refundID, p.UserID); err != nil {
+				id, company_id, store_id, product_id, quantity_delta, movement_type, reason, ref_type, ref_id, actor_user_id,
+				origin_unit_id, origin_unit_name, origin_quantity
+			) VALUES ($1,$2,$3,$4,$5,'refund',$6,'refund',$7,$8,$9,$10,$11)
+		`, uuid.New(), p.CompanyID, storeID, line.product, money.Num(line.base), in.Reason, refundID, p.UserID, line.unit, line.unitName, money.Num(line.qty)); err != nil {
 			return RefundResult{}, err
 		}
 	}

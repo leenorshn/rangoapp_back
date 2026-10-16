@@ -15,7 +15,7 @@ type reportSource struct {
 	filter    reports.Filter
 }
 
-func readFields(deps Deps) (graphql.Fields, graphql.Fields) {
+func readFields(deps Deps) (graphql.Fields, graphql.Fields, *graphql.Object) {
 	moneyAmount := graphql.NewObject(graphql.ObjectConfig{
 		Name: "MoneyAmount",
 		Fields: graphql.Fields{
@@ -360,7 +360,7 @@ func readFields(deps Deps) (graphql.Fields, graphql.Fields) {
 	for name, field := range cashQueries {
 		fields[name] = field
 	}
-	return fields, cashMutations
+	return fields, cashMutations, moneyAmount
 }
 
 func storePage(p graphql.ResolveParams, deps Deps) (tenant.Principal, uuid.UUID, readmodel.Page, error) {

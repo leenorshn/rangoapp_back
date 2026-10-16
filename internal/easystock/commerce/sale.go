@@ -60,6 +60,7 @@ type resolvedLine struct {
 	LineNet      decimal.Decimal
 	UnitCost     decimal.Decimal
 	CostComplete bool
+	UnitName     string
 }
 
 func (s *Service) ConfirmSale(ctx context.Context, p tenant.Principal, in ConfirmSaleInput) (SaleResult, error) {
@@ -244,9 +245,10 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO stock_movements (
-				id, company_id, store_id, product_id, quantity_delta, movement_type, ref_type, ref_id, actor_user_id
-			) VALUES ($1,$2,$3,$4,$5,'sale','sale',$6,$7)
-		`, uuid.New(), p.CompanyID, in.StoreID, line.ProductID, money.Num(line.BaseQty.Neg()), saleID, p.UserID); err != nil {
+				id, company_id, store_id, product_id, quantity_delta, movement_type, ref_type, ref_id, actor_user_id,
+				origin_unit_id, origin_unit_name, origin_quantity
+			) VALUES ($1,$2,$3,$4,$5,'sale','sale',$6,$7,$8,$9,$10)
+		`, uuid.New(), p.CompanyID, in.StoreID, line.ProductID, money.Num(line.BaseQty.Neg()), saleID, p.UserID, line.UnitID, line.UnitName, money.Num(line.Quantity)); err != nil {
 			return SaleResult{}, err
 		}
 		totals[line.ProductID] = totals[line.ProductID].Add(line.BaseQty)
@@ -337,11 +339,10 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	if !line.Quantity.IsPositive() {
 		return resolvedLine{}, domain.Invalid("quantity", "La quantité doit être supérieure à zéro.")
 	}
-	var fractional bool
 	var status string
 	if err := tx.QueryRow(ctx, `
-		SELECT allow_fractional, status FROM products WHERE id = $1
-	`, line.ProductID).Scan(&fractional, &status); err != nil {
+		SELECT status FROM products WHERE id = $1
+	`, line.ProductID).Scan(&status); err != nil {
 		return resolvedLine{}, domain.NotFound("Article introuvable.")
 	}
 	if status != "active" {
@@ -349,16 +350,20 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	}
 	var unitID uuid.UUID
 	var factor pgtype.Numeric
-	var active bool
+	var active, allowSale, unitFractional bool
 	if err := tx.QueryRow(ctx, `
-		SELECT id, factor, active FROM product_units WHERE product_id = $1 AND name = $2
-	`, line.ProductID, line.UnitName).Scan(&unitID, &factor, &active); err != nil {
+		SELECT id, factor, active, allow_sale, allow_fractional
+		FROM product_units WHERE product_id = $1 AND name = $2
+	`, line.ProductID, line.UnitName).Scan(&unitID, &factor, &active, &allowSale, &unitFractional); err != nil {
 		return resolvedLine{}, domain.NotFound("Conditionnement introuvable pour cet article.")
 	}
 	if !active {
 		return resolvedLine{}, domain.FailedPrecondition("unit_archived", "Ce conditionnement est archivé et ne peut plus être vendu.")
 	}
-	if err := soldQuantityAllowed(fractional, line.Quantity); err != nil {
+	if !allowSale {
+		return resolvedLine{}, domain.FailedPrecondition("unit_not_for_sale", "Ce conditionnement n'est pas autorisé à la vente.")
+	}
+	if err := soldQuantityAllowed(unitFractional, line.Quantity); err != nil {
 		return resolvedLine{}, err
 	}
 	factorDec, err := money.FromNum(factor)
@@ -386,6 +391,7 @@ func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency str
 	return resolvedLine{
 		ProductID: line.ProductID,
 		UnitID:    unitID,
+		UnitName:  line.UnitName,
 		Quantity:  line.Quantity,
 		BaseQty:   baseQty,
 		UnitPrice: unitPrice,

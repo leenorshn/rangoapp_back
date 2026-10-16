@@ -14,24 +14,30 @@ import (
 )
 
 const (
-	SalesCreate     = "sales.create"
-	SalesRefund     = "sales.refund"
-	SalesDiscount   = "sales.discount"
-	CreditAuthorize = "credit.authorize"
-	StockReceive    = "stock.receive"
-	StockAdjust     = "stock.adjust"
-	DebtsCollect    = "debts.collect"
-	CashOpen        = "cash.open"
-	CashClose       = "cash.close"
-	ExpensesCreate  = "expenses.create"
-	ReportsRead     = "reports.read"
-	ReportsExport   = "reports.export"
-	MarginsRead     = "margins.read"
-	MembersManage   = "members.manage"
-	StoresManage    = "stores.manage"
-	BillingManage   = "billing.manage"
-	CatalogManage   = "catalog.manage"
-	RatesManage     = "rates.manage"
+	SalesCreate            = "sales.create"
+	SalesRefund            = "sales.refund"
+	SalesDiscount          = "sales.discount"
+	CreditAuthorize        = "credit.authorize"
+	StockRead              = "stock.read"
+	StockReceive           = "stock.receive"
+	StockAdjust            = "stock.adjust"
+	StockInventoryStart    = "stock.inventory.start"
+	StockInventoryCount    = "stock.inventory.count"
+	StockInventoryValidate = "stock.inventory.validate"
+	StockMovementsRead     = "stock.movements.read"
+	StockValuationRead     = "stock.valuation.read"
+	DebtsCollect           = "debts.collect"
+	CashOpen               = "cash.open"
+	CashClose              = "cash.close"
+	ExpensesCreate         = "expenses.create"
+	ReportsRead            = "reports.read"
+	ReportsExport          = "reports.export"
+	MarginsRead            = "margins.read"
+	MembersManage          = "members.manage"
+	StoresManage           = "stores.manage"
+	BillingManage          = "billing.manage"
+	CatalogManage          = "catalog.manage"
+	RatesManage            = "rates.manage"
 )
 
 // Decision is the result of a successful authorization check.
@@ -53,14 +59,14 @@ type Decision struct {
 }
 
 var rolePerms = map[string]map[string]struct{}{
-	"owner":              permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, BillingManage, CatalogManage, RatesManage),
-	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
-	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
-	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
-	"seller":             permSet(SalesCreate, CashOpen, CashClose),
-	"cashier":            permSet(SalesCreate, CashOpen, CashClose, DebtsCollect),
-	"stockkeeper":        permSet(StockReceive, StockAdjust, ReportsRead),
-	"accountant":         permSet(ReportsRead, ReportsExport, MarginsRead),
+	"owner":              permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, BillingManage, CatalogManage, RatesManage),
+	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
+	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
+	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
+	"seller":             permSet(SalesCreate, CashOpen, CashClose, StockRead, StockMovementsRead),
+	"cashier":            permSet(SalesCreate, CashOpen, CashClose, DebtsCollect, StockRead, StockMovementsRead),
+	"stockkeeper":        permSet(StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, ReportsRead),
+	"accountant":         permSet(ReportsRead, ReportsExport, MarginsRead, StockRead, StockMovementsRead, StockValuationRead),
 }
 
 func permSet(perms ...string) map[string]struct{} {
@@ -88,6 +94,7 @@ func IsOperational(role string) bool {
 func IsCommercial(perm string) bool {
 	switch perm {
 	case SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust,
+		StockInventoryStart, StockInventoryCount, StockInventoryValidate,
 		DebtsCollect, CashOpen, CashClose, ExpensesCreate, CatalogManage, StoresManage:
 		return true
 	default:
@@ -220,7 +227,7 @@ func authorize(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, stor
 			return Decision{}, err
 		}
 	}
-	if (perm == ReportsExport || perm == MarginsRead) && !decision.AllowExport {
+	if (perm == ReportsExport || perm == MarginsRead || perm == StockValuationRead) && !decision.AllowExport {
 		return Decision{}, domain.PermissionDenied("plan", "Cette offre ne comprend pas les exports ni les marges. Passez à l'offre Pro pour les activer.")
 	}
 	return decision, nil

@@ -5,6 +5,7 @@ sql:
     schema:
       - internal/easystock/migrate/sql/000001_schema.up.sql
       - internal/easystock/migrate/sql/000006_catalog.up.sql
+      - internal/easystock/migrate/sql/000008_stock_module.up.sql
     gen:
       go:
         package: dbsql

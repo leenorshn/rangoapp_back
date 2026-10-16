@@ -273,7 +273,9 @@ func attach(ctx context.Context, tx pgx.Tx, products []Product, ids, stores []uu
 		}
 		products[at].Units = append(products[at].Units, Unit{
 			ID: row.ID, ProductID: row.ProductID, Name: row.Name, Factor: plain(row.Factor),
-			Barcode: deref(row.Barcode), IsBase: row.IsBase, Active: row.Active, Prices: []Price{},
+			Barcode: deref(row.Barcode), IsBase: row.IsBase, Active: row.Active,
+			AllowPurchase: row.AllowPurchase, AllowSale: row.AllowSale, AllowFractional: row.AllowFractional,
+			Prices: []Price{},
 		})
 		unitAt[row.ID] = struct{ product, pos int }{at, len(products[at].Units) - 1}
 	}
@@ -306,9 +308,10 @@ func loadUnit(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Unit, error) {
 	var item Unit
 	var factor, barcode *string
 	err := tx.QueryRow(ctx, `
-		SELECT id, product_id, name, factor::text, barcode, is_base, active
+		SELECT id, product_id, name, factor::text, barcode, is_base, active,
+		       allow_purchase, allow_sale, allow_fractional
 		FROM product_units WHERE id = $1
-	`, id).Scan(&item.ID, &item.ProductID, &item.Name, &factor, &barcode, &item.IsBase, &item.Active)
+	`, id).Scan(&item.ID, &item.ProductID, &item.Name, &factor, &barcode, &item.IsBase, &item.Active, &item.AllowPurchase, &item.AllowSale, &item.AllowFractional)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Unit{}, domain.NotFound("Conditionnement introuvable.")
 	}

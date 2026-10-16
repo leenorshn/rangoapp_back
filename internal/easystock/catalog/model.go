@@ -30,15 +30,19 @@ type Product struct {
 }
 
 // Unit is one packaging. Factor is how many base units it contains.
+// Purchase and sale rights are independent. Stock is never stored per packaging.
 type Unit struct {
-	ID        uuid.UUID
-	ProductID uuid.UUID
-	Name      string
-	Factor    string
-	Barcode   string
-	IsBase    bool
-	Active    bool
-	Prices    []Price
+	ID              uuid.UUID
+	ProductID       uuid.UUID
+	Name            string
+	Factor          string
+	Barcode         string
+	IsBase          bool
+	Active          bool
+	AllowPurchase   bool
+	AllowSale       bool
+	AllowFractional bool
+	Prices          []Price
 }
 
 // Price is the server price for one store, packaging and currency.
@@ -98,12 +102,16 @@ type UpdateInput struct {
 
 // UnitInput is one packaging to create or edit.
 // HasFactor and HasBarcode tell an update apart from a zero value.
+// Nil purchase, sale and fractional pointers keep the previous or inherited value.
 type UnitInput struct {
-	Name       string
-	Factor     decimal.Decimal
-	HasFactor  bool
-	Barcode    string
-	HasBarcode bool
+	Name            string
+	Factor          decimal.Decimal
+	HasFactor       bool
+	Barcode         string
+	HasBarcode      bool
+	AllowPurchase   *bool
+	AllowSale       *bool
+	AllowFractional *bool
 }
 
 // PriceInput upserts one server price. A nil amount means the currency was left blank.

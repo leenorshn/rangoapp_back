@@ -404,7 +404,7 @@ func (s *Service) Stock(ctx context.Context, p tenant.Principal, storeID uuid.UU
 	}
 	var out []StockItem
 	err = s.with(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := authorizeAny(ctx, tx, p, &storeID, access.ReportsRead, access.SalesCreate, access.StockReceive, access.StockAdjust); err != nil {
+		if _, err := authorizeAny(ctx, tx, p, &storeID, access.ReportsRead, access.SalesCreate, access.StockReceive, access.StockAdjust, access.StockRead); err != nil {
 			return err
 		}
 		if err := requireStore(ctx, tx, storeID); err != nil {

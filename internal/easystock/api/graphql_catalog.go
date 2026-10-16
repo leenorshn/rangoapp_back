@@ -32,14 +32,17 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 	unit := graphql.NewObject(graphql.ObjectConfig{
 		Name: "ProductUnit",
 		Fields: graphql.Fields{
-			"id":        &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"productId": &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"name":      &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"factor":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"barcode":   &graphql.Field{Type: graphql.String},
-			"isBase":    &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"active":    &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"prices":    &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(price)))},
+			"id":              &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"productId":       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"name":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"factor":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"barcode":         &graphql.Field{Type: graphql.String},
+			"isBase":          &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"active":          &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"allowPurchase":   &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"allowSale":       &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"allowFractional": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"prices":          &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(price)))},
 		},
 	})
 	cost := graphql.NewObject(graphql.ObjectConfig{
@@ -100,9 +103,12 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 	unitInput := graphql.NewInputObject(graphql.InputObjectConfig{
 		Name: "ProductUnitInput",
 		Fields: graphql.InputObjectConfigFieldMap{
-			"name":    &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
-			"factor":  &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
-			"barcode": &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"name":            &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"factor":          &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"barcode":         &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"allowPurchase":   &graphql.InputObjectFieldConfig{Type: graphql.Boolean},
+			"allowSale":       &graphql.InputObjectFieldConfig{Type: graphql.Boolean},
+			"allowFractional": &graphql.InputObjectFieldConfig{Type: graphql.Boolean},
 		},
 	})
 	priceInput := graphql.NewInputObject(graphql.InputObjectConfig{
@@ -589,7 +595,9 @@ func unitsJSON(units []catalog.Unit) []any {
 func unitJSON(unit catalog.Unit) map[string]any {
 	out := map[string]any{
 		"id": unit.ID.String(), "productId": unit.ProductID.String(), "name": unit.Name,
-		"factor": unit.Factor, "isBase": unit.IsBase, "active": unit.Active, "prices": pricesJSON(unit.Prices),
+		"factor": unit.Factor, "isBase": unit.IsBase, "active": unit.Active,
+		"allowPurchase": unit.AllowPurchase, "allowSale": unit.AllowSale, "allowFractional": unit.AllowFractional,
+		"prices": pricesJSON(unit.Prices),
 	}
 	if unit.Barcode != "" {
 		out["barcode"] = unit.Barcode
@@ -755,10 +763,23 @@ func unitInputs(raw any) ([]catalog.UnitInput, error) {
 			return nil, errUnavailable("Le facteur est illisible.")
 		}
 		_, hasBarcode := row["barcode"]
-		out = append(out, catalog.UnitInput{
+		item := catalog.UnitInput{
 			Name: str(row["name"]), Factor: factor, HasFactor: true,
 			Barcode: str(row["barcode"]), HasBarcode: hasBarcode,
-		})
+		}
+		if _, ok := row["allowPurchase"]; ok {
+			value, _ := row["allowPurchase"].(bool)
+			item.AllowPurchase = &value
+		}
+		if _, ok := row["allowSale"]; ok {
+			value, _ := row["allowSale"].(bool)
+			item.AllowSale = &value
+		}
+		if _, ok := row["allowFractional"]; ok {
+			value, _ := row["allowFractional"].(bool)
+			item.AllowFractional = &value
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }

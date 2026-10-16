@@ -24,7 +24,8 @@ ORDER BY sync_at, id
 LIMIT sqlc.arg(row_limit);
 
 -- name: ListUnitsForProducts :many
-SELECT id, product_id, name, factor, barcode, is_base, active
+SELECT id, product_id, name, factor, barcode, is_base, active,
+       allow_purchase, allow_sale, allow_fractional
 FROM product_units
 WHERE product_id = ANY(sqlc.arg(product_ids)::uuid[])
 ORDER BY is_base DESC, name, id;

@@ -153,20 +153,24 @@ func (q *Queries) ListPricesForStore(ctx context.Context, arg ListPricesForStore
 }
 
 const listUnitsForProducts = `-- name: ListUnitsForProducts :many
-SELECT id, product_id, name, factor, barcode, is_base, active
+SELECT id, product_id, name, factor, barcode, is_base, active,
+       allow_purchase, allow_sale, allow_fractional
 FROM product_units
 WHERE product_id = ANY($1::uuid[])
 ORDER BY is_base DESC, name, id
 `
 
 type ListUnitsForProductsRow struct {
-	ID        uuid.UUID
-	ProductID uuid.UUID
-	Name      string
-	Factor    string
-	Barcode   *string
-	IsBase    bool
-	Active    bool
+	ID               uuid.UUID
+	ProductID        uuid.UUID
+	Name             string
+	Factor           string
+	Barcode          *string
+	IsBase           bool
+	Active           bool
+	AllowPurchase    bool
+	AllowSale        bool
+	AllowFractional  bool
 }
 
 func (q *Queries) ListUnitsForProducts(ctx context.Context, productIds []uuid.UUID) ([]ListUnitsForProductsRow, error) {
@@ -186,6 +190,9 @@ func (q *Queries) ListUnitsForProducts(ctx context.Context, productIds []uuid.UU
 			&i.Barcode,
 			&i.IsBase,
 			&i.Active,
+			&i.AllowPurchase,
+			&i.AllowSale,
+			&i.AllowFractional,
 		); err != nil {
 			return nil, err
 		}

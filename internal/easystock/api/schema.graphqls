@@ -15,6 +15,9 @@ type Query {
   customers(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [Customer!]!
   debts(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [Debt!]!
   stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
+  stockInventory(id: ID!): StockInventory!
+  stockMovements(storeId: ID!, productId: ID, type: String, after: DateTime, afterId: ID, limit: Int): [StockMovement!]!
+  stockSummary(storeId: ID): StockSummary!
   cash(storeId: ID!): [CashRegister!]!
   cashSession(id: ID!): CashSession!
   cashSessions(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [CashSession!]!
@@ -33,6 +36,10 @@ type Query {
 
 type Mutation {
   confirmSale(input: ConfirmSaleInput!): SaleResult!
+  receiveStock(input: ReceiveStockInput!): StockReceipt!
+  startStockInventory(input: StartStockInventoryInput!): StockInventory!
+  recordInventoryCount(input: RecordInventoryCountInput!): StockInventoryLine!
+  completeStockInventory(input: CompleteStockInventoryInput!): StockInventory!
   openCashSession(input: OpenCashSessionInput!): CashSession!
   closeCashSession(input: CloseCashSessionInput!): CashSession!
   createProduct(input: ProductInput!): Product!
@@ -133,6 +140,9 @@ type ProductUnit {
   barcode: String
   isBase: Boolean!
   active: Boolean!
+  allowPurchase: Boolean!
+  allowSale: Boolean!
+  allowFractional: Boolean!
   prices: [ProductPrice!]!
 }
 
@@ -170,6 +180,9 @@ input ProductUnitInput {
   name: String!
   factor: String!
   barcode: String
+  allowPurchase: Boolean
+  allowSale: Boolean
+  allowFractional: Boolean
 }
 
 input ProductPriceInput {
@@ -273,6 +286,126 @@ type StockItem {
   quantity: String!
   alertThreshold: String!
   belowAlert: Boolean!
+  updatedAt: DateTime!
+}
+
+type StockReceipt {
+  id: ID!
+  storeId: ID!
+  supplierId: ID
+  currency: String!
+  totalCost: String!
+  reference: String
+  note: String
+  lines: [StockReceiptLine!]!
+}
+
+type StockReceiptLine {
+  productId: ID!
+  productUnitId: ID!
+  unitName: String!
+  quantity: String!
+  baseQuantity: String!
+  unitCost: String!
+  lineCost: String!
+}
+
+input ReceiveStockInput {
+  idempotencyKey: String!
+  storeId: ID!
+  supplierId: ID
+  supplierName: String
+  currency: String!
+  reference: String
+  note: String
+  lines: [ReceiveStockLineInput!]!
+}
+
+input ReceiveStockLineInput {
+  productId: ID!
+  productUnitId: ID
+  unitName: String
+  quantity: String!
+  unitCost: String!
+}
+
+type StockInventory {
+  id: ID!
+  companyId: ID!
+  storeId: ID!
+  createdBy: ID!
+  status: String!
+  note: String
+  startedAt: DateTime!
+  completedAt: DateTime
+  lines: [StockInventoryLine!]!
+}
+
+type StockInventoryLine {
+  id: ID!
+  productId: ID!
+  productName: String!
+  productUnitId: ID!
+  unitName: String!
+  factor: String!
+  countedQuantity: String!
+  baseQuantity: String!
+  theoreticalQuantity: String!
+  countedBaseTotal: String!
+  variance: String!
+  varianceValue: String
+  varianceCurrency: String
+  costIncomplete: Boolean!
+  reason: String
+}
+
+input StartStockInventoryInput {
+  storeId: ID!
+  note: String
+}
+
+input RecordInventoryCountInput {
+  inventoryId: ID!
+  productId: ID!
+  productUnitId: ID!
+  countedQuantity: String!
+  reason: String
+}
+
+input CompleteStockInventoryInput {
+  inventoryId: ID!
+}
+
+type StockMovement {
+  id: ID!
+  productId: ID!
+  sku: String!
+  productName: String!
+  storeId: ID!
+  type: String!
+  quantity: String!
+  originUnit: String
+  originQuantity: String
+  refType: String
+  refId: ID
+  actorId: ID
+  reason: String
+  createdAt: DateTime!
+}
+
+# stockCostValues et incompleteCostProducts sont nuls sans le droit de valorisation
+# ou sans l'offre qui l'inclut. USD et CDF ne sont jamais additionnés.
+type StockSummary {
+  totalProducts: Int!
+  productsInStock: Int!
+  outOfStockProducts: Int!
+  lowStockProducts: Int!
+  stockCostValues: [MoneyAmount!]
+  costMethod: String!
+  stockRetailValues: [MoneyAmount!]!
+  retailMethod: String!
+  incompleteCostProducts: Int
+  incompleteRetailProducts: Int!
   updatedAt: DateTime!
 }
 
