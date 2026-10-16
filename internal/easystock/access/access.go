@@ -20,6 +20,13 @@ const (
 	CreditAuthorize        = "credit.authorize"
 	StockRead              = "stock.read"
 	StockReceive           = "stock.receive"
+	StockOpeningCreate     = "stock.opening.create"
+	StockLossCreate        = "stock.loss.create"
+	StockReturnCreate      = "stock.return.create"
+	StockTransferCreate    = "stock.transfer.create"
+	StockTransferDispatch  = "stock.transfer.dispatch"
+	StockTransferReceive   = "stock.transfer.receive"
+	StockTransferCancel    = "stock.transfer.cancel"
 	StockAdjust            = "stock.adjust"
 	StockInventoryStart    = "stock.inventory.start"
 	StockInventoryCount    = "stock.inventory.count"
@@ -62,13 +69,13 @@ type Decision struct {
 }
 
 var rolePerms = map[string]map[string]struct{}{
-	"owner":              permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, BillingManage, CatalogManage, RatesManage),
-	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
-	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
-	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
+	"owner":              permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockOpeningCreate, StockLossCreate, StockReturnCreate, StockTransferCreate, StockTransferDispatch, StockTransferReceive, StockTransferCancel, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, BillingManage, CatalogManage, RatesManage),
+	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockOpeningCreate, StockLossCreate, StockReturnCreate, StockTransferCreate, StockTransferDispatch, StockTransferReceive, StockTransferCancel, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
+	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockOpeningCreate, StockLossCreate, StockReturnCreate, StockTransferCreate, StockTransferDispatch, StockTransferReceive, StockTransferCancel, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
+	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockOpeningCreate, StockLossCreate, StockReturnCreate, StockTransferCreate, StockTransferDispatch, StockTransferReceive, StockTransferCancel, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
 	"seller":             permSet(SalesCreate, CreditAuthorize, CashOpen, CashClose, StockRead, StockMovementsRead),
 	"cashier":            permSet(SalesCreate, CreditAuthorize, CashOpen, CashClose, DebtsCollect, StockRead, StockMovementsRead),
-	"stockkeeper":        permSet(StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, ReportsRead),
+	"stockkeeper":        permSet(StockRead, StockReceive, StockOpeningCreate, StockLossCreate, StockReturnCreate, StockTransferCreate, StockTransferDispatch, StockTransferReceive, StockTransferCancel, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, ReportsRead),
 	"accountant":         permSet(ReportsRead, ReportsExport, MarginsRead, StockRead, StockMovementsRead, StockValuationRead),
 }
 
@@ -96,7 +103,7 @@ func IsOperational(role string) bool {
 
 func IsCommercial(perm string) bool {
 	switch perm {
-	case SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockAdjust,
+	case SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockReceive, StockOpeningCreate, StockLossCreate, StockReturnCreate, StockTransferCreate, StockTransferDispatch, StockTransferReceive, StockTransferCancel, StockAdjust,
 		StockInventoryStart, StockInventoryCount, StockInventoryValidate,
 		DebtsCollect, CashOpen, CashClose, ExpensesCreate, CatalogManage, StoresManage:
 		return true

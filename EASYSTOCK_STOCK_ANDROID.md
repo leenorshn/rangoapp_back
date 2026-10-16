@@ -12,6 +12,13 @@ Le stock d’un produit est **un seul solde par boutique, dans l’unité de bas
 |---|---|---|
 | `stock.read` | propriétaire, administrateur, gérant, responsable, vendeur, caissier, magasinier, comptable | quantités, inventaire en lecture |
 | `stock.receive` | propriétaire, administrateur, gérant, responsable, magasinier | réception |
+| `stock.opening.create` | idem | ouverture du stock déjà présent |
+| `stock.loss.create` | idem | perte, casse, vol, péremption |
+| `stock.return.create` | idem | retour fournisseur |
+| `stock.transfer.create` | idem | créer un transfert en brouillon |
+| `stock.transfer.dispatch` | idem | expédier depuis la boutique d'origine |
+| `stock.transfer.receive` | idem | réceptionner dans la boutique de destination |
+| `stock.transfer.cancel` | idem | annuler depuis la boutique d'origine |
 | `stock.inventory.start` | propriétaire, administrateur, gérant, responsable, magasinier | démarrer un inventaire |
 | `stock.inventory.count` | idem | compter |
 | `stock.inventory.validate` | idem | valider les écarts |
@@ -25,7 +32,7 @@ L’affectation à la boutique est exigée, sauf pour le propriétaire et l’ad
 
 ## 1. Créer un produit
 
-Mutation existante `createProduct`. La création **n’écrit aucun mouvement de stock**. Le stock initial passe par `receiveStock`.
+Mutation existante `createProduct`. La création **n’écrit aucun mouvement de stock**. Le stock déjà présent dans la boutique passe par `openInitialStock`. Une livraison fournisseur passe par `receiveStock`.
 
 Champs ajoutés sur chaque conditionnement : `allowPurchase`, `allowSale`, `allowFractional`. S’ils sont absents, l’achat et la vente sont autorisés, et le fractionnaire est celui du produit.
 
@@ -80,7 +87,7 @@ Codes : `product`, `factor`, `barcode`, `already_exists`, `product_archived`, `u
 
 Permission : `catalog.manage`.
 
-Scénario : l’écran article envoie `createProduct`, puis affiche les conditionnements renvoyés. Le stock affiché est 0 jusqu’à une réception.
+Scénario : l’écran article envoie `createProduct`, puis affiche les conditionnements renvoyés. Le stock affiché est 0 jusqu’à une ouverture initiale ou une réception.
 
 ## 2. Recevoir du stock
 
@@ -129,6 +136,183 @@ Codes : `receive`, `unit_not_for_purchase`, `unit_archived`, `product_archived`,
 Permission : `stock.receive`.
 
 Scénario : l’écran réception envoie la mutation. En cas de réseau douteux, il renvoie **la même** `idempotencyKey` et le même corps. Il affiche ensuite `baseQuantity` comme quantité entrée en unité de base.
+
+## 2a. Ouvrir le stock initial
+
+L’ouverture n’est pas une réception. Elle n’écrit ni achat, ni fournisseur, ni mouvement de caisse. Elle n’est acceptée que si le produit n’a encore aucun mouvement dans la boutique et que son solde est nul. Un stock revenu à zéro après une vente ne peut pas être rouvert.
+
+```graphql
+mutation ($input: OpenInitialStockInput!) {
+  openInitialStock(input: $input) {
+    id
+    storeId
+    note
+    createdBy
+    createdAt
+    lines { productId productUnitId unitName quantity factor baseQuantity unitCost currency lineCost }
+  }
+}
+```
+
+```json
+{
+  "input": {
+    "idempotencyKey": "ouverture-001",
+    "storeId": "STORE_ID",
+    "note": "Stock déjà en rayon",
+    "lines": [
+      {
+        "productId": "EAU_ID",
+        "productUnitId": "CARTON_UNIT_ID",
+        "quantity": "10",
+        "unitCost": "4",
+        "currency": "USD"
+      },
+      {
+        "productId": "SUCRE_ID",
+        "productUnitId": "SAC_UNIT_ID",
+        "quantity": "2",
+        "unitCost": "20",
+        "currency": "USD"
+      }
+    ]
+  }
+}
+```
+
+Dix cartons de facteur 24 donnent `baseQuantity` `240` et un mouvement `opening`. Deux sacs de 25 kg donnent `50`. `unitCost` et `currency` vont ensemble. S’ils sont absents, la quantité est enregistrée et le coût de référence n’est pas inventé. Le coût, lorsqu’il est envoyé, met à jour le coût moyen dans cette devise. USD et CDF ne sont pas additionnés.
+
+La même clé et le même contenu renvoient la même ouverture. Un autre contenu répond `idempotency_mismatch`. Une deuxième ouverture, ou une ouverture après une réception ou une vente, répond `opening_closed`.
+
+Codes : `opening`, `opening_closed`, `quantity`, `product_archived`, `unit_archived`, `not_found`, `idempotency_key`, `idempotency_mismatch`, `idempotency_in_progress`, `stock.opening.create`, `store`.
+
+Permission : `stock.opening.create`.
+
+## 2b. Enregistrer une perte
+
+```graphql
+mutation ($input: StockLossInput!) {
+  recordStockLoss(input: $input) {
+    id
+    productId
+    storeId
+    type
+    quantity
+    originUnit
+    originQuantity
+    reason
+    actorId
+    createdAt
+  }
+}
+```
+
+```json
+{
+  "input": {
+    "idempotencyKey": "perte-eau-001",
+    "storeId": "STORE_ID",
+    "productId": "EAU_ID",
+    "productUnitId": "BOUTEILLE_UNIT_ID",
+    "quantity": "5",
+    "reason": "damaged",
+    "note": "Casse à la livraison interne"
+  }
+}
+```
+
+Motifs acceptés : `damaged`, `expired`, `stolen`, `missing`, `other`. Cinq bouteilles sur un solde de 120 écrivent un mouvement `loss` de `-5` et laissent 115. La quantité est strictement positive. Une perte supérieure au stock répond `stock_conflict` et ne laisse pas de solde négatif. Aucun mouvement de caisse n’est créé. La valeur sortie est le coût moyen du moment ; elle n’est pas renvoyée par cette mutation.
+
+Permission : `stock.loss.create`.
+
+Codes : `loss`, `reason`, `quantity`, `stock_conflict`, `product_archived`, `unit_archived`, `not_found`, `idempotency_key`, `idempotency_mismatch`, `idempotency_in_progress`, `stock.loss.create`, `store`.
+
+## 2c. Retourner du stock au fournisseur
+
+`returnStockToSupplier` sort du stock. Aucun paiement fournisseur et aucune écriture de caisse ne sont créés.
+
+```graphql
+mutation ($input: SupplierReturnInput!) {
+  returnStockToSupplier(input: $input) {
+    id
+    storeId
+    supplierId
+    reference
+    reason
+    createdAt
+    lines { productId productUnitId unitName quantity factor baseQuantity }
+  }
+}
+```
+
+```json
+{
+  "input": {
+    "idempotencyKey": "retour-fournisseur-001",
+    "storeId": "STORE_ID",
+    "supplierName": "Brasserie",
+    "reference": "AV-14",
+    "reason": "Produits abîmés à la livraison",
+    "lines": [
+      { "productId": "EAU_ID", "productUnitId": "CARTON_UNIT_ID", "quantity": "2" }
+    ]
+  }
+}
+```
+
+`supplierId` ou `supplierName` est facultatif. Si `supplierId` est envoyé, le fournisseur doit appartenir à la boutique. Le motif est obligatoire, de 1 à 500 caractères. La quantité est strictement positive et convertie en unité de base. Deux cartons de facteur 24 retirent 48 unités de base et écrivent un mouvement `purchase_return` négatif, avec l'unité d'origine. Toutes les lignes passent ensemble : si une ligne dépasse le stock, rien n'est écrit. La valeur sortie est le coût moyen du moment ; elle n'est pas renvoyée.
+
+Permission : `stock.return.create`.
+
+Codes : `return`, `reason`, `reference`, `quantity`, `stock_conflict`, `product_archived`, `unit_archived`, `not_found`, `idempotency_key`, `idempotency_mismatch`, `idempotency_in_progress`, `stock.return.create`, `store`.
+
+## 2d. Transférer entre deux boutiques
+
+Un transfert est un seul document. Il ne crée jamais une sortie et une entrée indépendantes. La quantité en transit est celle du document, pas un troisième solde de stock.
+
+```graphql
+mutation ($input: StockTransferInput!) {
+  createStockTransfer(input: $input) {
+    id
+    status
+    version
+    inTransit
+    lines { productId unitName quantity factor baseQuantity }
+    events { fromStatus toStatus actorId createdAt }
+  }
+}
+
+mutation ($input: StockTransferActionInput!) {
+  dispatchStockTransfer(input: $input) { id status version inTransit }
+}
+
+mutation ($input: StockTransferActionInput!) {
+  receiveStockTransfer(input: $input) { id status inTransit }
+}
+
+mutation ($input: StockTransferActionInput!) {
+  cancelStockTransfer(input: $input) { id status inTransit }
+}
+
+query ($id: ID!) {
+  stockTransfer(id: $id) { id status version inTransit sourceStoreId destinationStoreId }
+}
+```
+
+Statuts : `draft`, `in_transit`, `received`, `cancelled`.
+
+- `createStockTransfer` crée un brouillon. Aucun mouvement, aucune réservation. Le stock n'est pas vérifié.
+- `dispatchStockTransfer` écrit `transfer_out` sur la boutique d'origine et passe le document à `in_transit`. `inTransit` devient la somme des quantités de base. Une deuxième expédition répond `transfer_dispatched`.
+- `receiveStockTransfer` écrit `transfer_in` sur la boutique de destination. `inTransit` revient à `0`. Une deuxième réception répond `transfer_received`. Réceptionner un brouillon répond `transfer_status`.
+- `cancelStockTransfer` sur un brouillon n'écrit aucun mouvement. Sur un envoi déjà parti, le `transfer_out` reste dans le journal et un `transfer_in` compensatoire revient sur la boutique d'origine, avec le motif `returned_to_source`. Un transfert déjà reçu répond `transfer_received`. Un transfert déjà annulé répond `transfer_cancelled`.
+
+La boutique d'origine et la destination appartiennent à la même entreprise et doivent être différentes (`transfer_store`). L'expédition et l'annulation s'autorisent sur l'origine. La réception s'autorise sur la destination : un magasinier affecté seulement à l'origine reçoit `store`. Ce n'est pas une vente : aucun chiffre d'affaires et aucun mouvement de caisse.
+
+Chaque changement de statut incrémente `version` et ajoute un événement. La même clé d'idempotence rejoue le résultat. Une nouvelle clé sur une action déjà faite est refusée.
+
+Permissions : `stock.transfer.create`, `stock.transfer.dispatch`, `stock.transfer.receive`, `stock.transfer.cancel`.
+
+Codes : `transfer`, `transfer_store`, `transfer_status`, `transfer_dispatched`, `transfer_received`, `transfer_cancelled`, `quantity`, `stock_conflict`, `not_found`, `idempotency_key`, `idempotency_mismatch`, `idempotency_in_progress`, `stock.transfer.create`, `stock.transfer.dispatch`, `stock.transfer.receive`, `stock.transfer.cancel`, `store`.
 
 ## 3. Vendre
 
@@ -269,8 +453,12 @@ query ($store: ID!, $product: ID, $type: String, $after: DateTime, $afterId: ID)
 | `sale_return` | `refund` | `sale_return`, `refund` |
 | `inventory_adjustment` | `inventory_adjustment` ou l’ancien `adjustment` | `inventory_adjustment`, `adjustment` |
 | `opening` | `opening` | `opening` |
+| `loss` | `loss` | `loss` |
+| `purchase_return` | `purchase_return` | `purchase_return` |
+| `transfer_out` | `transfer_out` | `transfer_out` |
+| `transfer_in` | `transfer_in` | `transfer_in` |
 
-`purchase_return`, `loss`, `transfer_in` et `transfer_out` sont réservés. Aucune mutation ne les produit encore. Un filtre inconnu répond `movement_type`.
+`opening` est produit par `openInitialStock`. `loss` est produit par `recordStockLoss`. `purchase_return` est produit par `returnStockToSupplier`. `transfer_out` est produit à l'expédition. `transfer_in` est produit à la réception, ou sur la boutique d'origine quand un envoi en transit est annulé (`reason` = `returned_to_source`). Un filtre inconnu répond `movement_type`.
 
 Le curseur est la paire `createdAt` + `id` du dernier élément, comme pour `stock`.
 
@@ -320,7 +508,9 @@ Permission de lecture : `stock.read`.
 | Code | Signification |
 |---|---|
 | `unauthenticated` | jeton absent ou invalide |
-| `stock.receive` et les autres noms de permission | action refusée |
+| `stock.receive`, `stock.opening.create`, `stock.loss.create`, `stock.return.create`, `stock.transfer.create`, `stock.transfer.dispatch`, `stock.transfer.receive`, `stock.transfer.cancel` | action refusée |
+| `opening_closed` | le produit a déjà un mouvement ou une quantité dans la boutique |
+| `reason` | motif de perte absent ou hors de la liste |
 | `store` | pas affecté à la boutique |
 | `not_found` | produit, conditionnement, boutique ou inventaire invisible pour cette entreprise |
 | `unit_not_for_purchase` | conditionnement interdit à l’achat |
@@ -331,6 +521,12 @@ Permission de lecture : `stock.read`.
 | `inventory_open` | un inventaire est déjà ouvert dans la boutique |
 | `inventory_stale` | le stock a bougé pendant le comptage |
 | `inventory_completed` | déjà validé |
-| `stock_conflict` | vente au-delà du stock |
+| `stock_conflict` | vente, perte, retour ou expédition au-delà du stock |
+| `transfer_store` | origine et destination identiques |
+| `transfer_status` | action impossible dans l'état actuel, par exemple réceptionner un brouillon |
+| `transfer_dispatched` | transfert déjà expédié |
+| `transfer_received` | transfert déjà réceptionné, ou annulation d'un transfert reçu |
+| `transfer_cancelled` | transfert déjà annulé |
+| `return` | retour fournisseur illisible ou sans ligne |
 | `price_changed` | `expectedUnitPrice` ne correspond plus au prix serveur |
 | `SUBSCRIPTION_EXPIRED` | écriture refusée, abonnement expiré |

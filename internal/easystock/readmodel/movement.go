@@ -22,7 +22,7 @@ func CanonicalMovementType(stored string) string {
 }
 
 // MovementTypeFilter accepts the stored value or the Android name.
-// purchase_return, loss and transfers are reserved: they match no current write.
+// opening, loss, purchase_return, transfer_out and transfer_in are written by stock commands.
 func MovementTypeFilter(requested string) ([]string, error) {
 	switch strings.TrimSpace(requested) {
 	case "":

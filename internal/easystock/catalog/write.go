@@ -611,6 +611,7 @@ func unitUsed(ctx context.Context, tx pgx.Tx, unitID uuid.UUID) (bool, error) {
 	err := tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM sale_items WHERE product_unit_id = $1)
 		    OR EXISTS (SELECT 1 FROM purchase_items WHERE product_unit_id = $1)
+		    OR EXISTS (SELECT 1 FROM stock_movements WHERE origin_unit_id = $1)
 	`, unitID).Scan(&used)
 	return used, err
 }

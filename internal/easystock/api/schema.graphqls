@@ -16,6 +16,7 @@ type Query {
   debts(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [Debt!]!
   stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
   stockInventory(id: ID!): StockInventory!
+  stockTransfer(id: ID!): StockTransfer!
   stockMovements(storeId: ID!, productId: ID, type: String, after: DateTime, afterId: ID, limit: Int): [StockMovement!]!
   stockSummary(storeId: ID): StockSummary!
   cash(storeId: ID!): [CashRegister!]!
@@ -38,6 +39,13 @@ type Mutation {
   confirmSale(input: ConfirmSaleInput!): SaleResult!
   createCustomer(input: CreateCustomerInput!): Customer!
   receiveStock(input: ReceiveStockInput!): StockReceipt!
+  openInitialStock(input: OpenInitialStockInput!): StockOpening!
+  recordStockLoss(input: StockLossInput!): StockMovement!
+  returnStockToSupplier(input: SupplierReturnInput!): SupplierReturn!
+  createStockTransfer(input: StockTransferInput!): StockTransfer!
+  dispatchStockTransfer(input: StockTransferActionInput!): StockTransfer!
+  receiveStockTransfer(input: StockTransferActionInput!): StockTransfer!
+  cancelStockTransfer(input: StockTransferActionInput!): StockTransfer!
   startStockInventory(input: StartStockInventoryInput!): StockInventory!
   recordInventoryCount(input: RecordInventoryCountInput!): StockInventoryLine!
   completeStockInventory(input: CompleteStockInventoryInput!): StockInventory!
@@ -342,6 +350,138 @@ input ReceiveStockLineInput {
   unitName: String
   quantity: String!
   unitCost: String!
+}
+
+type StockOpening {
+  id: ID!
+  storeId: ID!
+  note: String
+  createdBy: ID!
+  createdAt: DateTime!
+  lines: [StockOpeningLine!]!
+}
+
+type StockOpeningLine {
+  productId: ID!
+  productUnitId: ID!
+  unitName: String!
+  quantity: String!
+  factor: String!
+  baseQuantity: String!
+  unitCost: String
+  currency: String
+  lineCost: String
+}
+
+input OpenInitialStockInput {
+  idempotencyKey: String!
+  storeId: ID!
+  note: String
+  lines: [OpenInitialStockLineInput!]!
+}
+
+input OpenInitialStockLineInput {
+  productId: ID!
+  productUnitId: ID!
+  quantity: String!
+  unitCost: String
+  currency: String
+}
+
+input StockLossInput {
+  idempotencyKey: String!
+  storeId: ID!
+  productId: ID!
+  productUnitId: ID!
+  quantity: String!
+  reason: String!
+  note: String
+}
+
+type SupplierReturn {
+  id: ID!
+  storeId: ID!
+  supplierId: ID
+  reference: String
+  reason: String!
+  createdAt: DateTime!
+  lines: [SupplierReturnLine!]!
+}
+
+type SupplierReturnLine {
+  productId: ID!
+  productUnitId: ID!
+  unitName: String!
+  quantity: String!
+  factor: String!
+  baseQuantity: String!
+}
+
+input SupplierReturnInput {
+  idempotencyKey: String!
+  storeId: ID!
+  supplierId: ID
+  supplierName: String
+  reference: String
+  reason: String!
+  lines: [SupplierReturnLineInput!]!
+}
+
+input SupplierReturnLineInput {
+  productId: ID!
+  productUnitId: ID!
+  quantity: String!
+}
+
+type StockTransfer {
+  id: ID!
+  sourceStoreId: ID!
+  destinationStoreId: ID!
+  status: String!
+  reference: String
+  note: String
+  version: Int!
+  inTransit: String!
+  createdBy: ID!
+  createdAt: DateTime!
+  lines: [StockTransferLine!]!
+  events: [StockTransferEvent!]!
+}
+
+type StockTransferLine {
+  productId: ID!
+  productUnitId: ID!
+  unitName: String!
+  quantity: String!
+  factor: String!
+  baseQuantity: String!
+}
+
+type StockTransferEvent {
+  fromStatus: String
+  toStatus: String!
+  actorId: ID
+  createdAt: DateTime!
+}
+
+input StockTransferInput {
+  idempotencyKey: String!
+  sourceStoreId: ID!
+  destinationStoreId: ID!
+  reference: String
+  note: String
+  lines: [StockTransferLineInput!]!
+}
+
+input StockTransferLineInput {
+  productId: ID!
+  productUnitId: ID!
+  quantity: String!
+}
+
+input StockTransferActionInput {
+  idempotencyKey: String!
+  id: ID!
 }
 
 type StockInventory {
