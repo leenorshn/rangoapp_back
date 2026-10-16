@@ -56,23 +56,26 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 	product := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Product",
 		Fields: graphql.Fields{
-			"id":              &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"companyId":       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"sku":             &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"name":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"description":     &graphql.Field{Type: graphql.String},
-			"category":        &graphql.Field{Type: category},
-			"categoryName":    &graphql.Field{Type: graphql.String},
-			"barcode":         &graphql.Field{Type: graphql.String},
-			"baseUnit":        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"allowFractional": &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"alertThreshold":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"status":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"archived":        &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
-			"createdAt":       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"updatedAt":       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
-			"units":           &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(unit)))},
-			"matchedUnitId":   &graphql.Field{Type: graphql.ID},
+			"id":                &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"companyId":         &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"sku":               &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"name":              &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"description":       &graphql.Field{Type: graphql.String},
+			"category":          &graphql.Field{Type: category},
+			"categoryName":      &graphql.Field{Type: graphql.String},
+			"barcode":           &graphql.Field{Type: graphql.String},
+			"baseUnit":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"allowFractional":   &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"alertThreshold":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"status":            &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"archived":          &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
+			"createdAt":         &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"updatedAt":         &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"units":             &graphql.Field{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(unit)))},
+			"matchedUnitId":     &graphql.Field{Type: graphql.ID},
+			"imageMediaId":      &graphql.Field{Type: graphql.ID},
+			"availableQuantity": &graphql.Field{Type: graphql.String},
+			"availability":      &graphql.Field{Type: graphql.String},
 			"cost": &graphql.Field{
 				Type: cost,
 				Resolve: func(p graphql.ResolveParams) (any, error) {
@@ -146,6 +149,7 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 				"storeId":    &graphql.ArgumentConfig{Type: graphql.ID},
 				"search":     &graphql.ArgumentConfig{Type: graphql.String},
 				"categoryId": &graphql.ArgumentConfig{Type: graphql.ID},
+				"forSale":    &graphql.ArgumentConfig{Type: graphql.Boolean},
 				"after":      &graphql.ArgumentConfig{Type: graphql.DateTime},
 				"afterId":    &graphql.ArgumentConfig{Type: graphql.ID},
 				"limit":      &graphql.ArgumentConfig{Type: graphql.Int},
@@ -172,7 +176,8 @@ func catalogAPI(deps Deps) (graphql.Fields, graphql.Fields) {
 				}
 				rows, err := deps.Commerce.ListProducts(p.Context, member, catalog.ListFilter{
 					StoreID: storeID, Search: str(p.Args["search"]), CategoryID: categoryID,
-					After: page.After, AfterID: page.AfterID, Limit: page.Limit,
+					ForSale: boolArg(p.Args["forSale"]),
+					After:   page.After, AfterID: page.AfterID, Limit: page.Limit,
 				})
 				if err != nil {
 					return nil, err
@@ -555,6 +560,13 @@ func productJSON(row catalog.Product, storeID uuid.UUID) map[string]any {
 	}
 	if row.MatchedUnitID != uuid.Nil {
 		out["matchedUnitId"] = row.MatchedUnitID.String()
+	}
+	if row.ImageMediaID != uuid.Nil {
+		out["imageMediaId"] = row.ImageMediaID.String()
+	}
+	if row.StockKnown {
+		out["availableQuantity"] = row.AvailableQuantity
+		out["availability"] = row.Availability
 	}
 	if storeID != uuid.Nil {
 		out["_storeId"] = storeID.String()

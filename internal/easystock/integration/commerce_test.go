@@ -58,7 +58,7 @@ func seed(t *testing.T, admin *pgxpool.Pool) world {
 }
 
 func saleInput(w world, key string, qty, paid string) commerce.ConfirmSaleInput {
-	return commerce.ConfirmSaleInput{
+	in := commerce.ConfirmSaleInput{
 		IdempotencyKey: key,
 		StoreID:        w.store,
 		CustomerID:     &w.customer,
@@ -69,6 +69,10 @@ func saleInput(w world, key string, qty, paid string) commerce.ConfirmSaleInput 
 		}},
 		Payments: []commerce.PaymentInput{{Method: "external", Amount: money.Must(paid)}},
 	}
+	if money.Must(paid).LessThan(money.Must(qty).Mul(money.Must("10"))) {
+		in.DebtDueDate = "2099-01-01"
+	}
+	return in
 }
 
 func TestAppRoleCannotBypassRLS(t *testing.T) {

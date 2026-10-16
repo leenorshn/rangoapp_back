@@ -4,7 +4,7 @@
 
 type Query {
   subscription: Subscription!
-  products(storeId: ID, search: String, categoryId: ID, after: DateTime, afterId: ID, limit: Int): [Product!]!
+  products(storeId: ID, search: String, categoryId: ID, forSale: Boolean, after: DateTime, afterId: ID, limit: Int): [Product!]!
   product(id: ID!, storeId: ID): Product!
   productByBarcode(storeId: ID!, barcode: String!): Product!
   productCategories: [ProductCategory!]!
@@ -12,7 +12,7 @@ type Query {
   registration: Registration!
   invitations: [Invitation!]!
   sales(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [Sale!]!
-  customers(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [Customer!]!
+  customers(storeId: ID!, search: String, after: DateTime, afterId: ID, limit: Int): [Customer!]!
   debts(storeId: ID!, status: String, after: DateTime, afterId: ID, limit: Int): [Debt!]!
   stock(storeId: ID!, after: DateTime, afterId: ID, limit: Int): [StockItem!]!
   stockInventory(id: ID!): StockInventory!
@@ -36,6 +36,7 @@ type Query {
 
 type Mutation {
   confirmSale(input: ConfirmSaleInput!): SaleResult!
+  createCustomer(input: CreateCustomerInput!): Customer!
   receiveStock(input: ReceiveStockInput!): StockReceipt!
   startStockInventory(input: StartStockInventoryInput!): StockInventory!
   recordInventoryCount(input: RecordInventoryCountInput!): StockInventoryLine!
@@ -123,6 +124,11 @@ type Product {
   updatedAt: DateTime!
   units: [ProductUnit!]!
   matchedUnitId: ID
+  imageMediaId: ID
+  # Present when storeId was sent. Quantity is in the base unit.
+  availableQuantity: String
+  # available or out_of_stock. Present when storeId was sent.
+  availability: String
   # Null sans la permission de marge ou sans l'offre qui l'inclut.
   cost: ProductCost
 }
@@ -258,8 +264,12 @@ type Customer {
   storeId: ID!
   name: String!
   phone: String
+  whatsappPhone: String
+  address: String
   notes: String
   creditLimit: String
+  # Null when the caller cannot read debts. Empty when none are open.
+  openDebts: [MoneyAmount!]
   createdAt: DateTime!
 }
 
@@ -273,8 +283,13 @@ type Debt {
   originalAmount: String!
   collectedAmount: String!
   dueAmount: String!
+  # Cash or external amount paid when the sale was confirmed. Later repayments stay in collectedAmount.
+  advanceAmount: String!
+  # Calendar date YYYY-MM-DD. Null on debts created before the due date was required.
   dueOn: String
+  # open (unpaid), partial, settled (paid). overdue is a filter, not a stored status.
   status: String!
+  overdue: Boolean!
   createdAt: DateTime!
 }
 
@@ -533,6 +548,17 @@ input ConfirmSaleInput {
   lines: [SaleLineInput!]!
   payments: [PaymentInput!]!
   cashSessionId: ID
+  # Calendar date YYYY-MM-DD. Required when payments do not cover the sale.
+  debtDueDate: String
+}
+
+input CreateCustomerInput {
+  storeId: ID!
+  name: String!
+  address: String!
+  phone: String
+  whatsappPhone: String
+  notes: String
 }
 
 input MoneyInput {
@@ -572,11 +598,18 @@ input PaymentInput {
 
 type SaleResult {
   saleId: ID!
+  reference: String!
   currency: String!
   netAmount: String!
   paidAmount: String!
   dueAmount: String!
   debtId: ID
+  # Calendar date YYYY-MM-DD when a debt was created.
+  debtDueDate: String
+  customerId: ID
+  customerName: String
+  createdAt: DateTime
+  itemCount: Int
 }
 
 scalar DateTime

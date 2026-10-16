@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	"google.golang.org/grpc"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -50,9 +50,20 @@ func (s *CommerceServer) ConfirmSale(ctx context.Context, req *commercev1.Confir
 	resp := &commercev1.ConfirmSaleResponse{
 		SaleId: out.SaleID.String(), Currency: out.Currency,
 		NetAmount: out.Net, PaidAmount: out.Paid, DueAmount: out.Due,
+		CreatedAt: out.CreatedAt.UTC().Format(time.RFC3339Nano),
+		ItemCount: int32(out.ItemCount),
 	}
 	if out.DebtID != nil {
 		resp.DebtId = out.DebtID.String()
+	}
+	if out.DebtDueDate != "" {
+		resp.DebtDueDate = out.DebtDueDate
+	}
+	if out.CustomerID != nil {
+		resp.CustomerId = out.CustomerID.String()
+	}
+	if out.CustomerName != "" {
+		resp.CustomerName = out.CustomerName
 	}
 	return resp, nil
 }
@@ -135,6 +146,7 @@ func saleInput(req *commercev1.ConfirmSaleRequest) (commerce.ConfirmSaleInput, e
 		StoreID:        storeID,
 		Currency:       req.GetCurrency(),
 		ClientDraftID:  req.GetClientDraftId(),
+		DebtDueDate:    req.GetDebtDueDate(),
 	}
 	if req.GetCustomerId() != "" {
 		id, err := uuid.Parse(req.GetCustomerId())

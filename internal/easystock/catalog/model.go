@@ -27,6 +27,11 @@ type Product struct {
 	UpdatedAt       time.Time
 	Units           []Unit
 	MatchedUnitID   uuid.UUID
+	ImageMediaID    uuid.UUID
+	// StockKnown is true when the list was loaded for one store.
+	StockKnown        bool
+	AvailableQuantity string
+	Availability      string
 }
 
 // Unit is one packaging. Factor is how many base units it contains.
@@ -133,4 +138,6 @@ type ListFilter struct {
 	After      time.Time
 	AfterID    uuid.UUID
 	Limit      int
+	// ForSale keeps products that still have an active packaging allowed for sale.
+	ForSale bool
 }

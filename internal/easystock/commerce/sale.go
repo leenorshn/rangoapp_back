@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
+	"time"
 
 	"rangoapp/internal/easystock/access"
 	"rangoapp/internal/easystock/domain"
@@ -39,15 +41,23 @@ type ConfirmSaleInput struct {
 	CashSessionID  *uuid.UUID
 	DiscountAmount decimal.Decimal
 	ClientDraftID  string
+	// DebtDueDate is a calendar date YYYY-MM-DD. It is required when a balance remains.
+	DebtDueDate string `json:"debtDueDate,omitempty"`
 }
 
 type SaleResult struct {
-	SaleID   uuid.UUID  `json:"saleId"`
-	Currency string     `json:"currency"`
-	Net      string     `json:"net"`
-	Paid     string     `json:"paid"`
-	Due      string     `json:"due"`
-	DebtID   *uuid.UUID `json:"debtId,omitempty"`
+	SaleID       uuid.UUID  `json:"saleId"`
+	Reference    string     `json:"reference"`
+	Currency     string     `json:"currency"`
+	Net          string     `json:"net"`
+	Paid         string     `json:"paid"`
+	Due          string     `json:"due"`
+	DebtID       *uuid.UUID `json:"debtId,omitempty"`
+	DebtDueDate  string     `json:"debtDueDate,omitempty"`
+	CustomerID   *uuid.UUID `json:"customerId,omitempty"`
+	CustomerName string     `json:"customerName,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	ItemCount    int        `json:"itemCount"`
 }
 
 type resolvedLine struct {
@@ -163,6 +173,8 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		return SaleResult{}, domain.Invalid("payment", "Le montant reçu dépasse le montant à payer. Ajustez les paiements.")
 	}
 	due := net.Sub(paid)
+	var dueOn pgtype.Date
+	var dueOnText string
 	if due.IsPositive() {
 		if in.CustomerID == nil {
 			return SaleResult{}, domain.Invalid("customer", "Choisissez un client pour une vente qui n'est pas entièrement payée.")
@@ -171,8 +183,12 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		if err != nil {
 			return SaleResult{}, err
 		}
-		if !credit.UnlimitedCredit && due.GreaterThan(credit.MaxCredit) {
+		if credit.CreditLimited && due.GreaterThan(credit.MaxCredit) {
 			return SaleResult{}, domain.PermissionDenied("credit_ceiling", "Le crédit dépasse le plafond autorisé.")
+		}
+		dueOn, dueOnText, err = resolveDebtDueDate(ctx, tx, in.StoreID, in.DebtDueDate)
+		if err != nil {
+			return SaleResult{}, err
 		}
 	}
 	if cashPaid.IsPositive() {
@@ -186,10 +202,11 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 	}
 
 	var creditLimit pgtype.Numeric
+	var customerName string
 	if in.CustomerID != nil {
 		if err := tx.QueryRow(ctx, `
-			SELECT credit_limit FROM customers WHERE id = $1 AND store_id = $2 AND archived_at IS NULL
-		`, *in.CustomerID, in.StoreID).Scan(&creditLimit); err != nil {
+			SELECT name, credit_limit FROM customers WHERE id = $1 AND store_id = $2 AND archived_at IS NULL
+		`, *in.CustomerID, in.StoreID).Scan(&customerName, &creditLimit); err != nil {
 			return SaleResult{}, domain.NotFound("Client introuvable dans cette boutique.")
 		}
 		if creditLimit.Valid && due.IsPositive() {
@@ -216,13 +233,15 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 	}
 
 	saleID := uuid.New()
-	if _, err := tx.Exec(ctx, `
+	var createdAt time.Time
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO sales (
 			id, company_id, store_id, customer_id, operator_user_id, currency,
 			gross_amount, discount_amount, net_amount, paid_amount, due_amount
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		RETURNING created_at
 	`, saleID, p.CompanyID, in.StoreID, in.CustomerID, p.UserID, in.Currency,
-		money.Num(gross), money.Num(discount), money.Num(net), money.Num(paid), money.Num(due)); err != nil {
+		money.Num(gross), money.Num(discount), money.Num(net), money.Num(paid), money.Num(due)).Scan(&createdAt); err != nil {
 		return SaleResult{}, err
 	}
 
@@ -300,12 +319,15 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		if paid.IsPositive() {
 			status = "partial"
 		}
+		// The advance stays on the sale payments. collected_amount starts at zero
+		// so a later repayment is not mixed with the amount paid at the counter.
+		// original_amount is the unpaid balance, not the basket total.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO debts (
 				id, company_id, store_id, customer_id, sale_id, currency,
-				original_amount, collected_amount, offset_amount, due_amount, status
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,0,0,$7,$8)
-		`, id, p.CompanyID, in.StoreID, *in.CustomerID, saleID, in.Currency, money.Num(due), status); err != nil {
+				original_amount, collected_amount, offset_amount, due_amount, due_on, status
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,0,0,$7,$8,$9)
+		`, id, p.CompanyID, in.StoreID, *in.CustomerID, saleID, in.Currency, money.Num(due), dueOn, status); err != nil {
 			return SaleResult{}, err
 		}
 	}
@@ -318,21 +340,57 @@ func confirmSale(ctx context.Context, tx pgx.Tx, p tenant.Principal, in ConfirmS
 		}
 	}
 	if err := audit(ctx, tx, p, &in.StoreID, "sale.confirm", "sale", saleID, map[string]string{
-		"currency": in.Currency,
-		"net":      net.String(),
-		"paid":     paid.String(),
-		"due":      due.String(),
+		"currency":    in.Currency,
+		"net":         net.String(),
+		"paid":        paid.String(),
+		"due":         due.String(),
+		"debtDueDate": dueOnText,
 	}); err != nil {
 		return SaleResult{}, err
 	}
 	return SaleResult{
-		SaleID:   saleID,
-		Currency: in.Currency,
-		Net:      net.String(),
-		Paid:     paid.String(),
-		Due:      due.String(),
-		DebtID:   debtID,
+		SaleID:       saleID,
+		Reference:    saleID.String(),
+		Currency:     in.Currency,
+		Net:          net.String(),
+		Paid:         paid.String(),
+		Due:          due.String(),
+		DebtID:       debtID,
+		DebtDueDate:  dueOnText,
+		CustomerID:   in.CustomerID,
+		CustomerName: customerName,
+		CreatedAt:    createdAt,
+		ItemCount:    len(resolved),
 	}, nil
+}
+
+// resolveDebtDueDate stores a civil date in the store timezone.
+// The same calendar day is allowed. A previous day is refused.
+func resolveDebtDueDate(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, raw string) (pgtype.Date, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return pgtype.Date{}, "", domain.Invalid("debt_due_date", "Indiquez la date prévue de paiement pour le solde restant.")
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", raw, time.UTC)
+	if err != nil {
+		return pgtype.Date{}, "", domain.Invalid("debt_due_date", "La date d'échéance doit être au format AAAA-MM-JJ.")
+	}
+	var tz string
+	if err := tx.QueryRow(ctx, `SELECT timezone FROM stores WHERE id = $1`, storeID).Scan(&tz); err != nil {
+		return pgtype.Date{}, "", domain.NotFound("Boutique introuvable.")
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dueDay := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, time.UTC)
+	if dueDay.Before(today) {
+		return pgtype.Date{}, "", domain.Invalid("debt_due_date", "La date d'échéance ne peut pas être antérieure à la date de la vente.")
+	}
+	text := dueDay.Format("2006-01-02")
+	return pgtype.Date{Time: dueDay, Valid: true}, text, nil
 }
 
 func resolveLine(ctx context.Context, tx pgx.Tx, storeID uuid.UUID, currency string, line SaleLineInput) (resolvedLine, error) {

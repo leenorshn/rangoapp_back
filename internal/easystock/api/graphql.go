@@ -89,12 +89,18 @@ func Schema(deps Deps) (graphql.Schema, error) {
 	saleResult := graphql.NewObject(graphql.ObjectConfig{
 		Name: "SaleResult",
 		Fields: graphql.Fields{
-			"saleId":     &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"currency":   &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"netAmount":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"paidAmount": &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"dueAmount":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"debtId":     &graphql.Field{Type: graphql.ID},
+			"saleId":       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"reference":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"currency":     &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"netAmount":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"paidAmount":   &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"dueAmount":    &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"debtId":       &graphql.Field{Type: graphql.ID},
+			"debtDueDate":  &graphql.Field{Type: graphql.String},
+			"customerId":   &graphql.Field{Type: graphql.ID},
+			"customerName": &graphql.Field{Type: graphql.String},
+			"createdAt":    &graphql.Field{Type: graphql.DateTime},
+			"itemCount":    &graphql.Field{Type: graphql.Int},
 		},
 	})
 	subscription := graphql.NewObject(graphql.ObjectConfig{
@@ -132,6 +138,7 @@ func Schema(deps Deps) (graphql.Schema, error) {
 			"lines":          &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(lineInput)))},
 			"payments":       &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(paymentInput)))},
 			"cashSessionId":  &graphql.InputObjectFieldConfig{Type: graphql.ID},
+			"debtDueDate":    &graphql.InputObjectFieldConfig{Type: graphql.String},
 		},
 	})
 	queryFields := graphql.Fields{
@@ -201,11 +208,24 @@ func Schema(deps Deps) (graphql.Schema, error) {
 					return nil, fromGRPC(err)
 				}
 				result := map[string]any{
-					"saleId": out.GetSaleId(), "currency": out.GetCurrency(),
+					"saleId": out.GetSaleId(), "reference": out.GetSaleId(), "currency": out.GetCurrency(),
 					"netAmount": out.GetNetAmount(), "paidAmount": out.GetPaidAmount(), "dueAmount": out.GetDueAmount(),
+					"itemCount": int(out.GetItemCount()),
 				}
 				if out.GetDebtId() != "" {
 					result["debtId"] = out.GetDebtId()
+				}
+				if out.GetDebtDueDate() != "" {
+					result["debtDueDate"] = out.GetDebtDueDate()
+				}
+				if out.GetCustomerId() != "" {
+					result["customerId"] = out.GetCustomerId()
+				}
+				if out.GetCustomerName() != "" {
+					result["customerName"] = out.GetCustomerName()
+				}
+				if created, err := time.Parse(time.RFC3339Nano, out.GetCreatedAt()); err == nil {
+					result["createdAt"] = created
 				}
 				return result, nil
 			},
@@ -286,6 +306,7 @@ func saleRequest(raw any) (*commercev1.ConfirmSaleRequest, error) {
 		})
 	}
 	req.CashSessionId = str(input["cashSessionId"])
+	req.DebtDueDate = str(input["debtDueDate"])
 	if req.IdempotencyKey == "" || len(req.Lines) == 0 {
 		return nil, errUnavailable("La vente doit avoir une clé d'idempotence et au moins une ligne.")
 	}
@@ -349,6 +370,11 @@ func argUUID(value any) (uuid.UUID, error) {
 		return uuid.Nil, errUnavailable("Identifiant invalide.")
 	}
 	return id, nil
+}
+
+func boolArg(value any) bool {
+	typed, _ := value.(bool)
+	return typed
 }
 
 func argLimit(value any) int {

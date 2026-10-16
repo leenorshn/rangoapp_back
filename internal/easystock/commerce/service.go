@@ -89,6 +89,8 @@ func mapDB(err error) error {
 			return domain.FailedPrecondition("inventory_open", "Un inventaire est déjà en cours dans cette boutique.")
 		case pgErr.ConstraintName == "stock_balances_quantity_nonnegative":
 			return domain.Conflict("stock_conflict", "Stock insuffisant pour cet article. Réduisez la quantité ou approvisionnez la boutique.")
+		case pgErr.ConstraintName == "customers_company_phone_uq" || pgErr.ConstraintName == "customers_company_whatsapp_uq":
+			return domain.AlreadyExists("Un client de cette entreprise utilise déjà ce numéro.")
 		}
 		slog.Error("postgres", "code", pgErr.Code, "constraint", pgErr.ConstraintName)
 		return domain.Internal("L'opération n'a pas pu être enregistrée.")

@@ -52,6 +52,7 @@ func TestConfirmSaleSendsDecimalStringsAndContext(t *testing.T) {
 			}},
 			"payments":      []any{map[string]any{"method": "cash", "amount": "20.00"}},
 			"cashSessionId": uuid.NewString(),
+			"debtDueDate":   "2026-10-23",
 		},
 	}
 	result := Execute(WithPrincipal(context.Background(), member), schema, query, vars)
@@ -63,6 +64,9 @@ func TestConfirmSaleSendsDecimalStringsAndContext(t *testing.T) {
 	}
 	if sales.req.GetCashSessionId() == "" {
 		t.Fatal("cash session was not forwarded")
+	}
+	if sales.req.GetDebtDueDate() != "2026-10-23" {
+		t.Fatalf("debt due date = %q", sales.req.GetDebtDueDate())
 	}
 	if len(sales.md.Get("x-easystock-context")) != 1 {
 		t.Fatal("missing internal context")

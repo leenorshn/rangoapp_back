@@ -11,6 +11,7 @@ import (
 	"rangoapp/internal/easystock/catalog"
 	"rangoapp/internal/easystock/domain"
 	"rangoapp/internal/easystock/money"
+	"rangoapp/internal/easystock/phone"
 	"rangoapp/internal/easystock/tenant"
 
 	"github.com/google/uuid"
@@ -187,34 +188,140 @@ func (s *Service) SetPrice(ctx context.Context, p tenant.Principal, storeID, pro
 }
 
 type CustomerInput struct {
-	StoreID     uuid.UUID
-	Name        string
-	Phone       string
-	Notes       string
-	CreditLimit *decimal.Decimal
+	StoreID       uuid.UUID
+	Name          string
+	Phone         string
+	WhatsappPhone string
+	Address       string
+	Notes         string
+	CreditLimit   *decimal.Decimal
 }
 
-func (s *Service) CreateCustomer(ctx context.Context, p tenant.Principal, in CustomerInput) (uuid.UUID, error) {
-	var id uuid.UUID
+// CustomerCard is a customer created during a sale. The phone numbers are E.164.
+type CustomerCard struct {
+	ID            uuid.UUID
+	StoreID       uuid.UUID
+	Name          string
+	Phone         string
+	WhatsappPhone string
+	Address       string
+	Notes         string
+	CreatedAt     time.Time
+}
+
+func (s *Service) CreateCustomer(ctx context.Context, p tenant.Principal, in CustomerInput) (CustomerCard, error) {
+	var out CustomerCard
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, &in.StoreID, access.SalesCreate); err != nil {
 			return err
 		}
-		if in.Name == "" {
-			return domain.Invalid("customer", "Indiquez le nom du client.")
+		card, err := insertCustomer(ctx, tx, p, in)
+		if err != nil {
+			return err
 		}
-		id = uuid.New()
-		var limit any
-		if in.CreditLimit != nil {
-			limit = money.Num(*in.CreditLimit)
-		}
-		_, err := tx.Exec(ctx, `
-			INSERT INTO customers (id, company_id, store_id, name, phone, notes, credit_limit)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)
-		`, id, p.CompanyID, in.StoreID, in.Name, blankNull(in.Phone), blankNull(in.Notes), limit)
-		return err
+		out = card
+		return audit(ctx, tx, p, &in.StoreID, "customer.create", "customer", card.ID, map[string]string{"name": card.Name})
 	})
-	return id, err
+	return out, err
+}
+
+func insertCustomer(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CustomerInput) (CustomerCard, error) {
+	name := strings.TrimSpace(in.Name)
+	address := strings.TrimSpace(in.Address)
+	notes := strings.TrimSpace(in.Notes)
+	if name == "" || len(name) > 160 {
+		return CustomerCard{}, domain.Invalid("customer", "Indiquez le nom complet du client.")
+	}
+	if address == "" || len(address) > 300 {
+		return CustomerCard{}, domain.Invalid("address", "Indiquez l'adresse du client.")
+	}
+	if len(notes) > 500 {
+		return CustomerCard{}, domain.Invalid("notes", "La note est trop longue.")
+	}
+	var storeOK bool
+	if err := tx.QueryRow(ctx, `SELECT true FROM stores WHERE id = $1 AND archived_at IS NULL`, in.StoreID).Scan(&storeOK); err != nil || !storeOK {
+		return CustomerCard{}, domain.NotFound("Boutique introuvable.")
+	}
+	normalized, err := normalizeContact(in.Phone, in.WhatsappPhone)
+	if err != nil {
+		return CustomerCard{}, err
+	}
+	numbers := uniqueStrings(normalized.phone, normalized.whatsapp)
+	var taken bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM customers
+			WHERE archived_at IS NULL
+			  AND (phone = ANY($1::text[]) OR whatsapp_phone = ANY($1::text[]))
+		)
+	`, numbers).Scan(&taken); err != nil {
+		return CustomerCard{}, err
+	}
+	if taken {
+		return CustomerCard{}, domain.AlreadyExists("Un client de cette entreprise utilise déjà ce numéro.")
+	}
+	id := uuid.New()
+	var limit any
+	if in.CreditLimit != nil {
+		limit = money.Num(*in.CreditLimit)
+	}
+	var createdAt time.Time
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO customers (
+			id, company_id, store_id, name, phone, whatsapp_phone, address, notes, credit_limit
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		RETURNING created_at
+	`, id, p.CompanyID, in.StoreID, name, blankNull(normalized.phone), blankNull(normalized.whatsapp), address, blankNull(notes), limit).Scan(&createdAt); err != nil {
+		return CustomerCard{}, err
+	}
+	return CustomerCard{
+		ID: id, StoreID: in.StoreID, Name: name, Phone: normalized.phone,
+		WhatsappPhone: normalized.whatsapp, Address: address, Notes: notes, CreatedAt: createdAt,
+	}, nil
+}
+
+type normalizedContact struct {
+	phone    string
+	whatsapp string
+}
+
+func normalizeContact(phoneRaw, whatsappRaw string) (normalizedContact, error) {
+	phoneRaw = strings.TrimSpace(phoneRaw)
+	whatsappRaw = strings.TrimSpace(whatsappRaw)
+	if phoneRaw == "" && whatsappRaw == "" {
+		return normalizedContact{}, domain.Invalid("phone", "Indiquez un numéro de téléphone ou WhatsApp.")
+	}
+	var out normalizedContact
+	var err error
+	if phoneRaw != "" {
+		out.phone, err = phone.Normalize(phoneRaw, "CD")
+		if err != nil {
+			return normalizedContact{}, err
+		}
+	}
+	if whatsappRaw != "" {
+		out.whatsapp, err = phone.Normalize(whatsappRaw, "CD")
+		if err != nil {
+			return normalizedContact{}, domain.Invalid("whatsapp", "Indiquez un numéro WhatsApp valide.")
+		}
+	}
+	return out, nil
+}
+
+func uniqueStrings(values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (s *Service) SaveSaleDraft(ctx context.Context, p tenant.Principal, storeID uuid.UUID, clientDraftID string, payload json.RawMessage) error {

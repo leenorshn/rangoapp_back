@@ -49,6 +49,9 @@ type Decision struct {
 	UnlimitedCredit    bool
 	HasCreditCeiling   bool
 	MaxCredit          decimal.Decimal
+	// CreditLimited is true when an override or the company default sets a cap.
+	// A role allowed to sell on credit is not capped when neither is set.
+	CreditLimited      bool
 	PlanCode           string
 	SubscriptionStatus string
 	AllowExport        bool
@@ -63,8 +66,8 @@ var rolePerms = map[string]map[string]struct{}{
 	"organization_admin": permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, StockValuationRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MarginsRead, MembersManage, StoresManage, CatalogManage, RatesManage),
 	"manager":            permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, CatalogManage),
 	"store_manager":      permSet(SalesCreate, SalesRefund, SalesDiscount, CreditAuthorize, StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, DebtsCollect, CashOpen, CashClose, ExpensesCreate, ReportsRead, ReportsExport, MembersManage, CatalogManage),
-	"seller":             permSet(SalesCreate, CashOpen, CashClose, StockRead, StockMovementsRead),
-	"cashier":            permSet(SalesCreate, CashOpen, CashClose, DebtsCollect, StockRead, StockMovementsRead),
+	"seller":             permSet(SalesCreate, CreditAuthorize, CashOpen, CashClose, StockRead, StockMovementsRead),
+	"cashier":            permSet(SalesCreate, CreditAuthorize, CashOpen, CashClose, DebtsCollect, StockRead, StockMovementsRead),
 	"stockkeeper":        permSet(StockRead, StockReceive, StockAdjust, StockInventoryStart, StockInventoryCount, StockInventoryValidate, StockMovementsRead, ReportsRead),
 	"accountant":         permSet(ReportsRead, ReportsExport, MarginsRead, StockRead, StockMovementsRead, StockValuationRead),
 }
@@ -203,6 +206,7 @@ func authorize(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, stor
 	decision.UnlimitedCredit, decision.HasCreditCeiling, decision.MaxCredit = ceiling(
 		decision.Role, storeCredit, companyCredit, defaultCredit, false,
 	)
+	decision.CreditLimited = creditIsLimited(decision.Role, storeCredit, companyCredit, defaultCredit)
 
 	var lifecycle string
 	var trialEnd, periodEnd, archived *time.Time
@@ -279,6 +283,20 @@ func ceiling(role string, storeValue, companyValue, fallback pgtype.Numeric, rat
 		_ = rate
 	}
 	return false, true, decimal.Zero
+}
+
+// creditIsLimited reports an explicit cap. Owner and organization admin stay
+// unlimited unless a permission override sets one. Other roles are capped only
+// when the company default or an override is stored. An unset ceiling does not
+// mean zero: the fast-sale debt path would otherwise be blocked for every seller.
+func creditIsLimited(role string, storeCredit, companyCredit, fallback pgtype.Numeric) bool {
+	if storeCredit.Valid || companyCredit.Valid {
+		return true
+	}
+	if role == "owner" || role == "organization_admin" {
+		return false
+	}
+	return fallback.Valid
 }
 
 func firstValid(values ...pgtype.Numeric) pgtype.Numeric {

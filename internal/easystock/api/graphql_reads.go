@@ -1,6 +1,7 @@
 package api
 
 import (
+	"rangoapp/internal/easystock/commerce"
 	"rangoapp/internal/easystock/domain"
 	"rangoapp/internal/easystock/readmodel"
 	"rangoapp/internal/easystock/reports"
@@ -50,13 +51,16 @@ func readFields(deps Deps) (graphql.Fields, graphql.Fields, *graphql.Object) {
 	customer := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Customer",
 		Fields: graphql.Fields{
-			"id":          &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"storeId":     &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
-			"name":        &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
-			"phone":       &graphql.Field{Type: graphql.String},
-			"notes":       &graphql.Field{Type: graphql.String},
-			"creditLimit": &graphql.Field{Type: graphql.String},
-			"createdAt":   &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
+			"id":            &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"storeId":       &graphql.Field{Type: graphql.NewNonNull(graphql.ID)},
+			"name":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"phone":         &graphql.Field{Type: graphql.String},
+			"whatsappPhone": &graphql.Field{Type: graphql.String},
+			"address":       &graphql.Field{Type: graphql.String},
+			"notes":         &graphql.Field{Type: graphql.String},
+			"creditLimit":   &graphql.Field{Type: graphql.String},
+			"openDebts":     &graphql.Field{Type: graphql.NewList(graphql.NewNonNull(moneyAmount))},
+			"createdAt":     &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
 		},
 	})
 	debt := graphql.NewObject(graphql.ObjectConfig{
@@ -71,8 +75,10 @@ func readFields(deps Deps) (graphql.Fields, graphql.Fields, *graphql.Object) {
 			"originalAmount":  &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"collectedAmount": &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"dueAmount":       &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"advanceAmount":   &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
 			"dueOn":           &graphql.Field{Type: graphql.String},
 			"status":          &graphql.Field{Type: graphql.NewNonNull(graphql.String)},
+			"overdue":         &graphql.Field{Type: graphql.NewNonNull(graphql.Boolean)},
 			"createdAt":       &graphql.Field{Type: graphql.NewNonNull(graphql.DateTime)},
 		},
 	})
@@ -208,31 +214,25 @@ func readFields(deps Deps) (graphql.Fields, graphql.Fields, *graphql.Object) {
 		},
 		"customers": &graphql.Field{
 			Type: graphql.NewNonNull(graphql.NewList(graphql.NewNonNull(customer))),
-			Args: pageArgs,
+			Args: graphql.FieldConfigArgument{
+				"storeId": &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.ID)},
+				"search":  &graphql.ArgumentConfig{Type: graphql.String},
+				"after":   &graphql.ArgumentConfig{Type: graphql.DateTime},
+				"afterId": &graphql.ArgumentConfig{Type: graphql.ID},
+				"limit":   &graphql.ArgumentConfig{Type: graphql.Int},
+			},
 			Resolve: func(p graphql.ResolveParams) (any, error) {
 				member, storeID, page, err := storePage(p, deps)
 				if err != nil {
 					return nil, err
 				}
-				rows, err := deps.Reads.Customers(p.Context, member, storeID, page)
+				rows, err := deps.Reads.Customers(p.Context, member, storeID, str(p.Args["search"]), page)
 				if err != nil {
 					return nil, err
 				}
 				out := make([]map[string]any, 0, len(rows))
 				for _, row := range rows {
-					item := map[string]any{
-						"id": row.ID.String(), "storeId": row.StoreID.String(), "name": row.Name, "createdAt": row.CreatedAt,
-					}
-					if row.Phone != "" {
-						item["phone"] = row.Phone
-					}
-					if row.Notes != "" {
-						item["notes"] = row.Notes
-					}
-					if row.CreditLimit != "" {
-						item["creditLimit"] = row.CreditLimit
-					}
-					out = append(out, item)
+					out = append(out, customerJSON(row))
 				}
 				return out, nil
 			},
@@ -261,7 +261,8 @@ func readFields(deps Deps) (graphql.Fields, graphql.Fields, *graphql.Object) {
 						"id": row.ID.String(), "storeId": row.StoreID.String(), "customerId": row.CustomerID.String(),
 						"customerName": row.CustomerName, "saleId": row.SaleID.String(), "currency": row.Currency,
 						"originalAmount": row.OriginalAmount, "collectedAmount": row.CollectedAmount,
-						"dueAmount": row.DueAmount, "status": row.Status, "createdAt": row.CreatedAt,
+						"dueAmount": row.DueAmount, "advanceAmount": row.AdvanceAmount,
+						"status": row.Status, "overdue": row.Overdue, "createdAt": row.CreatedAt,
 					}
 					if row.DueOn != "" {
 						item["dueOn"] = row.DueOn
@@ -360,7 +361,92 @@ func readFields(deps Deps) (graphql.Fields, graphql.Fields, *graphql.Object) {
 	for name, field := range cashQueries {
 		fields[name] = field
 	}
+	cashMutations["createCustomer"] = &graphql.Field{
+		Type: graphql.NewNonNull(customer),
+		Args: graphql.FieldConfigArgument{
+			"input": &graphql.ArgumentConfig{Type: graphql.NewNonNull(createCustomerInput())},
+		},
+		Resolve: func(p graphql.ResolveParams) (any, error) {
+			member, err := requireCompany(p.Context)
+			if err != nil {
+				return nil, err
+			}
+			if deps.Commerce == nil {
+				return nil, errUnavailable("Clients indisponibles.")
+			}
+			in, err := customerInput(p.Args["input"])
+			if err != nil {
+				return nil, err
+			}
+			row, err := deps.Commerce.CreateCustomer(p.Context, member, in)
+			if err != nil {
+				return nil, err
+			}
+			return customerJSON(readmodel.Customer{
+				ID: row.ID, StoreID: row.StoreID, Name: row.Name, Phone: row.Phone,
+				WhatsappPhone: row.WhatsappPhone, Address: row.Address, Notes: row.Notes, CreatedAt: row.CreatedAt,
+			}), nil
+		},
+	}
 	return fields, cashMutations, moneyAmount
+}
+
+func createCustomerInput() *graphql.InputObject {
+	return graphql.NewInputObject(graphql.InputObjectConfig{
+		Name: "CreateCustomerInput",
+		Fields: graphql.InputObjectConfigFieldMap{
+			"storeId":       &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.ID)},
+			"name":          &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"address":       &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"phone":         &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"whatsappPhone": &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"notes":         &graphql.InputObjectFieldConfig{Type: graphql.String},
+		},
+	})
+}
+
+func customerInput(raw any) (commerce.CustomerInput, error) {
+	input, _ := raw.(map[string]any)
+	if input == nil {
+		return commerce.CustomerInput{}, errUnavailable("Client illisible.")
+	}
+	storeID, err := argUUID(input["storeId"])
+	if err != nil || storeID == uuid.Nil {
+		return commerce.CustomerInput{}, errUnavailable("Boutique invalide.")
+	}
+	return commerce.CustomerInput{
+		StoreID: storeID, Name: str(input["name"]), Address: str(input["address"]),
+		Phone: str(input["phone"]), WhatsappPhone: str(input["whatsappPhone"]), Notes: str(input["notes"]),
+	}, nil
+}
+
+func customerJSON(row readmodel.Customer) map[string]any {
+	item := map[string]any{
+		"id": row.ID.String(), "storeId": row.StoreID.String(), "name": row.Name, "createdAt": row.CreatedAt,
+	}
+	if row.Phone != "" {
+		item["phone"] = row.Phone
+	}
+	if row.WhatsappPhone != "" {
+		item["whatsappPhone"] = row.WhatsappPhone
+	}
+	if row.Address != "" {
+		item["address"] = row.Address
+	}
+	if row.Notes != "" {
+		item["notes"] = row.Notes
+	}
+	if row.CreditLimit != "" {
+		item["creditLimit"] = row.CreditLimit
+	}
+	if row.DebtsVisible {
+		debts := make([]any, 0, len(row.OpenDebts))
+		for _, debt := range row.OpenDebts {
+			debts = append(debts, map[string]any{"currency": debt.Currency, "amount": debt.Amount})
+		}
+		item["openDebts"] = debts
+	}
+	return item
 }
 
 func storePage(p graphql.ResolveParams, deps Deps) (tenant.Principal, uuid.UUID, readmodel.Page, error) {

@@ -35,6 +35,8 @@ message ConfirmSaleRequest {
   string cash_session_id = 7;
   string discount_amount = 8;
   string client_draft_id = 9;
+  // Calendar date YYYY-MM-DD. Required when the payments do not cover the sale.
+  string debt_due_date = 10;
 }
 
 message ConfirmSaleResponse {
@@ -44,6 +46,11 @@ message ConfirmSaleResponse {
   string paid_amount = 4;
   string due_amount = 5;
   string debt_id = 6;
+  string created_at = 7;
+  int32 item_count = 8;
+  string debt_due_date = 9;
+  string customer_id = 10;
+  string customer_name = 11;
 }
 
 message PayDebtRequest {

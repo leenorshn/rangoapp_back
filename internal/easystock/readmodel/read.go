@@ -2,11 +2,13 @@ package readmodel
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"rangoapp/internal/easystock/access"
 	"rangoapp/internal/easystock/domain"
 	"rangoapp/internal/easystock/money"
+	"rangoapp/internal/easystock/phone"
 	"rangoapp/internal/easystock/tenant"
 
 	"github.com/google/uuid"
@@ -68,13 +70,18 @@ type Sale struct {
 
 // Customer is a store customer card.
 type Customer struct {
-	ID          uuid.UUID
-	StoreID     uuid.UUID
-	Name        string
-	Phone       string
-	Notes       string
-	CreditLimit string
-	CreatedAt   time.Time
+	ID            uuid.UUID
+	StoreID       uuid.UUID
+	Name          string
+	Phone         string
+	WhatsappPhone string
+	Address       string
+	Notes         string
+	CreditLimit   string
+	CreatedAt     time.Time
+	// OpenDebts is set only when the caller may read debts.
+	DebtsVisible bool
+	OpenDebts    []Money
 }
 
 // Debt is an open or settled receivable.
@@ -88,8 +95,10 @@ type Debt struct {
 	OriginalAmount  string
 	CollectedAmount string
 	DueAmount       string
+	AdvanceAmount   string
 	DueOn           string
 	Status          string
+	Overdue         bool
 	CreatedAt       time.Time
 }
 
@@ -283,11 +292,12 @@ func (s *Service) Sales(ctx context.Context, p tenant.Principal, storeID uuid.UU
 	return out, err
 }
 
-func (s *Service) Customers(ctx context.Context, p tenant.Principal, storeID uuid.UUID, page Page) ([]Customer, error) {
+func (s *Service) Customers(ctx context.Context, p tenant.Principal, storeID uuid.UUID, search string, page Page) ([]Customer, error) {
 	page, err := page.normalize()
 	if err != nil {
 		return nil, err
 	}
+	search = strings.TrimSpace(search)
 	var out []Customer
 	err = s.with(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := authorizeAny(ctx, tx, p, &storeID, access.ReportsRead, access.SalesCreate, access.DebtsCollect); err != nil {
@@ -296,31 +306,44 @@ func (s *Service) Customers(ctx context.Context, p tenant.Principal, storeID uui
 		if err := requireStore(ctx, tx, storeID); err != nil {
 			return err
 		}
+		_, debtErr := access.AuthorizeRead(ctx, tx, p.CompanyID, p.UserID, &storeID, access.DebtsCollect)
+		_, reportErr := access.AuthorizeRead(ctx, tx, p.CompanyID, p.UserID, &storeID, access.ReportsRead)
+		debtsVisible := debtErr == nil || reportErr == nil
+		exact := ""
+		if normalized, err := phone.Normalize(search, "CD"); err == nil {
+			exact = normalized
+		}
 		rows, err := tx.Query(ctx, `
-			SELECT id, store_id, name, phone, notes, credit_limit, created_at
+			SELECT id, store_id, name, phone, whatsapp_phone, address, notes, credit_limit, created_at
 			FROM customers
 			WHERE store_id = $1 AND archived_at IS NULL
 			  AND ($2::boolean = false OR (created_at, id) < ($3, $4))
+			  AND (
+			    $5 = ''
+			    OR name ILIKE $6 ESCAPE '\'
+			    OR COALESCE(phone, '') ILIKE $6 ESCAPE '\'
+			    OR COALESCE(whatsapp_phone, '') ILIKE $6 ESCAPE '\'
+			    OR ($7 <> '' AND (phone = $7 OR whatsapp_phone = $7))
+			  )
 			ORDER BY created_at DESC, id DESC
-			LIMIT $5
-		`, storeID, page.AfterID != uuid.Nil, page.After, page.AfterID, page.Limit)
+			LIMIT $8
+		`, storeID, page.AfterID != uuid.Nil, page.After, page.AfterID, search, containsPattern(search), exact, page.Limit)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var item Customer
-			var phone, notes *string
+			var phone, whatsapp, address, notes *string
 			var limit pgtype.Numeric
-			if err := rows.Scan(&item.ID, &item.StoreID, &item.Name, &phone, &notes, &limit, &item.CreatedAt); err != nil {
+			if err := rows.Scan(&item.ID, &item.StoreID, &item.Name, &phone, &whatsapp, &address, &notes, &limit, &item.CreatedAt); err != nil {
 				return err
 			}
-			if phone != nil {
-				item.Phone = *phone
-			}
-			if notes != nil {
-				item.Notes = *notes
-			}
+			item.Phone = deref(phone)
+			item.WhatsappPhone = deref(whatsapp)
+			item.Address = deref(address)
+			item.Notes = deref(notes)
+			item.DebtsVisible = debtsVisible
 			if limit.Valid {
 				item.CreditLimit, err = numText(limit)
 				if err != nil {
@@ -329,7 +352,13 @@ func (s *Service) Customers(ctx context.Context, p tenant.Principal, storeID uui
 			}
 			out = append(out, item)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if debtsVisible {
+			return attachOpenDebts(ctx, tx, out)
+		}
+		return nil
 	})
 	return out, err
 }
@@ -339,8 +368,8 @@ func (s *Service) Debts(ctx context.Context, p tenant.Principal, storeID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	if status != "" && status != "open" && status != "partial" && status != "settled" {
-		return nil, domain.Invalid("status", "Le statut de dette doit être open, partial ou settled.")
+	if status != "" && status != "open" && status != "partial" && status != "settled" && status != "overdue" {
+		return nil, domain.Invalid("status", "Le statut de dette doit être open, partial, settled ou overdue.")
 	}
 	var out []Debt
 	err = s.with(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
@@ -352,11 +381,19 @@ func (s *Service) Debts(ctx context.Context, p tenant.Principal, storeID uuid.UU
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT d.id, d.store_id, d.customer_id, c.name, d.sale_id, d.currency,
-			       d.original_amount, d.collected_amount, d.due_amount, d.due_on, d.status, d.created_at
+			       d.original_amount, d.collected_amount, d.due_amount, s.paid_amount,
+			       d.due_on, d.status, d.created_at,
+			       (d.due_amount > 0 AND d.due_on IS NOT NULL AND d.due_on < (now() AT TIME ZONE st.timezone)::date) AS overdue
 			FROM debts d
 			JOIN customers c ON c.id = d.customer_id AND c.company_id = d.company_id
+			JOIN sales s ON s.id = d.sale_id AND s.company_id = d.company_id
+			JOIN stores st ON st.id = d.store_id AND st.company_id = d.company_id
 			WHERE d.store_id = $1
-			  AND ($2::text = '' OR d.status = $2)
+			  AND (
+			    $2::text = ''
+			    OR ($2 = 'overdue' AND d.due_amount > 0 AND d.due_on IS NOT NULL AND d.due_on < (now() AT TIME ZONE st.timezone)::date)
+			    OR ($2 <> 'overdue' AND d.status = $2)
+			  )
 			  AND ($3::boolean = false OR (d.created_at, d.id) < ($4, $5))
 			ORDER BY d.created_at DESC, d.id DESC
 			LIMIT $6
@@ -367,11 +404,11 @@ func (s *Service) Debts(ctx context.Context, p tenant.Principal, storeID uuid.UU
 		defer rows.Close()
 		for rows.Next() {
 			var item Debt
-			var original, collected, due pgtype.Numeric
+			var original, collected, due, advance pgtype.Numeric
 			var dueOn pgtype.Date
 			if err := rows.Scan(
 				&item.ID, &item.StoreID, &item.CustomerID, &item.CustomerName, &item.SaleID, &item.Currency,
-				&original, &collected, &due, &dueOn, &item.Status, &item.CreatedAt,
+				&original, &collected, &due, &advance, &dueOn, &item.Status, &item.CreatedAt, &item.Overdue,
 			); err != nil {
 				return err
 			}
@@ -384,6 +421,10 @@ func (s *Service) Debts(ctx context.Context, p tenant.Principal, storeID uuid.UU
 				return err
 			}
 			item.DueAmount, err = numText(due)
+			if err != nil {
+				return err
+			}
+			item.AdvanceAmount, err = numText(advance)
 			if err != nil {
 				return err
 			}
@@ -557,6 +598,64 @@ func authorizeFirst(ctx context.Context, tx pgx.Tx, p tenant.Principal, storeID 
 		last = domain.PermissionDenied("read", "Cette consultation ne vous est pas autorisée.")
 	}
 	return access.Decision{}, last
+}
+
+func attachOpenDebts(ctx context.Context, tx pgx.Tx, customers []Customer) error {
+	if len(customers) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(customers))
+	index := map[uuid.UUID]int{}
+	for i := range customers {
+		ids[i] = customers[i].ID
+		index[customers[i].ID] = i
+		customers[i].OpenDebts = []Money{}
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT customer_id, currency, COALESCE(SUM(due_amount), 0)
+		FROM debts
+		WHERE customer_id = ANY($1::uuid[]) AND due_amount > 0
+		GROUP BY customer_id, currency
+		ORDER BY currency
+	`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var currency string
+		var amount pgtype.Numeric
+		if err := rows.Scan(&id, &currency, &amount); err != nil {
+			return err
+		}
+		text, err := numText(amount)
+		if err != nil {
+			return err
+		}
+		at, ok := index[id]
+		if !ok {
+			continue
+		}
+		customers[at].OpenDebts = append(customers[at].OpenDebts, Money{Currency: strings.TrimSpace(currency), Amount: text})
+	}
+	return rows.Err()
+}
+
+func containsPattern(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return "%" + replacer.Replace(value) + "%"
+}
+
+func deref(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func numText(value pgtype.Numeric) (string, error) {

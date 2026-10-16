@@ -160,8 +160,10 @@ type ConfirmSaleRequest struct {
 	CashSessionId  string                 `protobuf:"bytes,7,opt,name=cash_session_id,json=cashSessionId,proto3" json:"cash_session_id,omitempty"`
 	DiscountAmount string                 `protobuf:"bytes,8,opt,name=discount_amount,json=discountAmount,proto3" json:"discount_amount,omitempty"`
 	ClientDraftId  string                 `protobuf:"bytes,9,opt,name=client_draft_id,json=clientDraftId,proto3" json:"client_draft_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Calendar date YYYY-MM-DD. Required when the payments do not cover the sale.
+	DebtDueDate   string `protobuf:"bytes,10,opt,name=debt_due_date,json=debtDueDate,proto3" json:"debt_due_date,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ConfirmSaleRequest) Reset() {
@@ -257,6 +259,13 @@ func (x *ConfirmSaleRequest) GetClientDraftId() string {
 	return ""
 }
 
+func (x *ConfirmSaleRequest) GetDebtDueDate() string {
+	if x != nil {
+		return x.DebtDueDate
+	}
+	return ""
+}
+
 type ConfirmSaleResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SaleId        string                 `protobuf:"bytes,1,opt,name=sale_id,json=saleId,proto3" json:"sale_id,omitempty"`
@@ -265,6 +274,11 @@ type ConfirmSaleResponse struct {
 	PaidAmount    string                 `protobuf:"bytes,4,opt,name=paid_amount,json=paidAmount,proto3" json:"paid_amount,omitempty"`
 	DueAmount     string                 `protobuf:"bytes,5,opt,name=due_amount,json=dueAmount,proto3" json:"due_amount,omitempty"`
 	DebtId        string                 `protobuf:"bytes,6,opt,name=debt_id,json=debtId,proto3" json:"debt_id,omitempty"`
+	CreatedAt     string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ItemCount     int32                  `protobuf:"varint,8,opt,name=item_count,json=itemCount,proto3" json:"item_count,omitempty"`
+	DebtDueDate   string                 `protobuf:"bytes,9,opt,name=debt_due_date,json=debtDueDate,proto3" json:"debt_due_date,omitempty"`
+	CustomerId    string                 `protobuf:"bytes,10,opt,name=customer_id,json=customerId,proto3" json:"customer_id,omitempty"`
+	CustomerName  string                 `protobuf:"bytes,11,opt,name=customer_name,json=customerName,proto3" json:"customer_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -337,6 +351,41 @@ func (x *ConfirmSaleResponse) GetDueAmount() string {
 func (x *ConfirmSaleResponse) GetDebtId() string {
 	if x != nil {
 		return x.DebtId
+	}
+	return ""
+}
+
+func (x *ConfirmSaleResponse) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *ConfirmSaleResponse) GetItemCount() int32 {
+	if x != nil {
+		return x.ItemCount
+	}
+	return 0
+}
+
+func (x *ConfirmSaleResponse) GetDebtDueDate() string {
+	if x != nil {
+		return x.DebtDueDate
+	}
+	return ""
+}
+
+func (x *ConfirmSaleResponse) GetCustomerId() string {
+	if x != nil {
+		return x.CustomerId
+	}
+	return ""
+}
+
+func (x *ConfirmSaleResponse) GetCustomerName() string {
+	if x != nil {
+		return x.CustomerName
 	}
 	return ""
 }
@@ -703,7 +752,7 @@ const file_proto_easystock_commerce_v1_commerce_proto_rawDesc = "" +
 	"\aPayment\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x12-\n" +
-	"\x12external_reference\x18\x03 \x01(\tR\x11externalReference\"\x81\x03\n" +
+	"\x12external_reference\x18\x03 \x01(\tR\x11externalReference\"\xa5\x03\n" +
 	"\x12ConfirmSaleRequest\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x19\n" +
 	"\bstore_id\x18\x02 \x01(\tR\astoreId\x12\x1f\n" +
@@ -714,7 +763,9 @@ const file_proto_easystock_commerce_v1_commerce_proto_rawDesc = "" +
 	"\bpayments\x18\x06 \x03(\v2\x1e.easystock.commerce.v1.PaymentR\bpayments\x12&\n" +
 	"\x0fcash_session_id\x18\a \x01(\tR\rcashSessionId\x12'\n" +
 	"\x0fdiscount_amount\x18\b \x01(\tR\x0ediscountAmount\x12&\n" +
-	"\x0fclient_draft_id\x18\t \x01(\tR\rclientDraftId\"\xc2\x01\n" +
+	"\x0fclient_draft_id\x18\t \x01(\tR\rclientDraftId\x12\"\n" +
+	"\rdebt_due_date\x18\n" +
+	" \x01(\tR\vdebtDueDate\"\xea\x02\n" +
 	"\x13ConfirmSaleResponse\x12\x17\n" +
 	"\asale_id\x18\x01 \x01(\tR\x06saleId\x12\x1a\n" +
 	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x12\x1d\n" +
@@ -724,7 +775,16 @@ const file_proto_easystock_commerce_v1_commerce_proto_rawDesc = "" +
 	"paidAmount\x12\x1d\n" +
 	"\n" +
 	"due_amount\x18\x05 \x01(\tR\tdueAmount\x12\x17\n" +
-	"\adebt_id\x18\x06 \x01(\tR\x06debtId\"\xd9\x01\n" +
+	"\adebt_id\x18\x06 \x01(\tR\x06debtId\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\a \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"item_count\x18\b \x01(\x05R\titemCount\x12\"\n" +
+	"\rdebt_due_date\x18\t \x01(\tR\vdebtDueDate\x12\x1f\n" +
+	"\vcustomer_id\x18\n" +
+	" \x01(\tR\n" +
+	"customerId\x12#\n" +
+	"\rcustomer_name\x18\v \x01(\tR\fcustomerName\"\xd9\x01\n" +
 	"\x0ePayDebtRequest\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
 	"\adebt_id\x18\x02 \x01(\tR\x06debtId\x12\x16\n" +

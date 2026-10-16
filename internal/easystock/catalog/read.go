@@ -43,9 +43,13 @@ func List(ctx context.Context, tx pgx.Tx, p tenant.Principal, filter ListFilter)
 		  )
 		  AND ($2::uuid IS NULL OR p.category_id = $2)
 		  AND (p.updated_at, p.id) > ($3, $4)
+		  AND ($6::boolean = false OR EXISTS (
+		    SELECT 1 FROM product_units u
+		    WHERE u.product_id = p.id AND u.active AND u.allow_sale
+		  ))
 		ORDER BY p.updated_at, p.id
 		LIMIT $5
-	`, containsPattern(filter.Search), category, filter.After, filter.AfterID, limit)
+	`, containsPattern(filter.Search), category, filter.After, filter.AfterID, limit, filter.ForSale)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +65,32 @@ func List(ctx context.Context, tx pgx.Tx, p tenant.Principal, filter ListFilter)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return loadMany(ctx, tx, ids, storeIDs(filter.StoreID), false)
+	products, err := loadMany(ctx, tx, ids, storeIDs(filter.StoreID), false)
+	if err != nil {
+		return nil, err
+	}
+	if filter.ForSale {
+		products = keepSellable(products)
+	}
+	return products, nil
+}
+
+func keepSellable(products []Product) []Product {
+	out := make([]Product, 0, len(products))
+	for _, product := range products {
+		units := make([]Unit, 0, len(product.Units))
+		for _, unit := range product.Units {
+			if unit.Active && unit.AllowSale {
+				units = append(units, unit)
+			}
+		}
+		if len(units) == 0 {
+			continue
+		}
+		product.Units = units
+		out = append(out, product)
+	}
+	return out
 }
 
 // Get returns one product, including an archived one, with one store's prices.
@@ -192,7 +221,8 @@ func loadMany(ctx context.Context, tx pgx.Tx, ids, stores []uuid.UUID, preserveM
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, p.company_id, p.sku, p.name, p.description, p.category_id,
 		       COALESCE(c.name, p.category, ''), p.barcode, p.base_unit, p.allow_fractional,
-		       p.alert_threshold::text, p.status, (p.archived_at IS NOT NULL), p.created_at, p.updated_at
+		       p.alert_threshold::text, p.status, (p.archived_at IS NOT NULL), p.created_at, p.updated_at,
+		       p.image_media_id
 		FROM products p
 		LEFT JOIN product_categories c ON c.id = p.category_id
 		WHERE p.id = ANY($1::uuid[])
@@ -236,12 +266,16 @@ func scanProduct(row pgx.Row) (Product, error) {
 	var description, barcode *string
 	var categoryID *uuid.UUID
 	var threshold string
+	var image pgtype.UUID
 	if err := row.Scan(
 		&item.ID, &item.CompanyID, &item.SKU, &item.Name, &description, &categoryID,
 		&item.Category, &barcode, &item.BaseUnit, &item.AllowFractional,
-		&threshold, &item.Status, &item.Archived, &item.CreatedAt, &item.UpdatedAt,
+		&threshold, &item.Status, &item.Archived, &item.CreatedAt, &item.UpdatedAt, &image,
 	); err != nil {
 		return Product{}, err
+	}
+	if image.Valid {
+		item.ImageMediaID = uuid.UUID(image.Bytes)
 	}
 	item.Description = deref(description)
 	item.Barcode = deref(barcode)
@@ -299,6 +333,59 @@ func attach(ctx context.Context, tx pgx.Tx, products []Product, ids, stores []uu
 				ID: row.ID, StoreID: row.StoreID, ProductID: row.ProductID, UnitID: row.ProductUnitID,
 				Currency: strings.TrimSpace(row.Currency), UnitPrice: moneyString(row.UnitPrice),
 			})
+		}
+	}
+	if len(stores) == 1 {
+		return attachStock(ctx, tx, products, stores[0])
+	}
+	return nil
+}
+
+func attachStock(ctx context.Context, tx pgx.Tx, products []Product, storeID uuid.UUID) error {
+	if storeID == uuid.Nil || len(products) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(products))
+	for i := range products {
+		ids[i] = products[i].ID
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT product_id, quantity
+		FROM stock_balances
+		WHERE store_id = $1 AND product_id = ANY($2::uuid[])
+	`, storeID, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	qty := map[uuid.UUID]string{}
+	positive := map[uuid.UUID]bool{}
+	for rows.Next() {
+		var id uuid.UUID
+		var raw pgtype.Numeric
+		if err := rows.Scan(&id, &raw); err != nil {
+			return err
+		}
+		value, err := money.FromNum(raw)
+		if err != nil {
+			return err
+		}
+		qty[id] = value.String()
+		positive[id] = value.IsPositive()
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range products {
+		products[i].StockKnown = true
+		products[i].AvailableQuantity = qty[products[i].ID]
+		if products[i].AvailableQuantity == "" {
+			products[i].AvailableQuantity = "0"
+		}
+		if positive[products[i].ID] {
+			products[i].Availability = "available"
+		} else {
+			products[i].Availability = "out_of_stock"
 		}
 	}
 	return nil
