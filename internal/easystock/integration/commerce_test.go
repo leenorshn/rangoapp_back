@@ -366,9 +366,9 @@ func TestQuotasRolesAndLocalPayment(t *testing.T) {
 	w := seed(t, admin)
 	ctx := context.Background()
 	svc := commerce.New(app)
-	second, err := svc.CreateStore(ctx, w.p, "Deuxième", "Africa/Lubumbashi")
-	if err != nil || second.Name != "Deuxième" {
-		t.Fatalf("store %+v %v", second, err)
+	extra, err := svc.CreateStore(ctx, w.p, "Deuxième", "Africa/Lubumbashi")
+	if err != nil || extra.Name != "Deuxième" {
+		t.Fatalf("store %+v %v", extra, err)
 	}
 	other := uuid.New()
 	if _, err := admin.Exec(ctx, `INSERT INTO users (id, display_name) VALUES ($1,'Admin')`, other); err != nil {

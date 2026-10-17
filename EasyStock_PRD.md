@@ -163,13 +163,13 @@ Ne jamais additionner CDF et USD sans conversion explicite. Les exports respecte
 
 ## 9. Abonnements et modèle économique
 
-L’abonnement est souscrit par entreprise, avec quotas globaux de boutiques et collaborateurs actifs. Aucune commission sur les ventes des commerçants.
+L’abonnement est souscrit par entreprise. Le prix et la durée changent selon l’offre. L’offre ne retire aucune fonction : l’échéance de l’abonnement est ce qui bloque l’accès. Le rôle de l’appelant continue de limiter ce qu’il peut faire. Aucune commission sur les ventes des commerçants.
 
-| Offre proposée | Prix mensuel à tester | Boutiques | Collaborateurs actifs | Fonctions |
-|---|---:|---:|---:|---|
-| Essentiel | 5 USD | 1 | 2 | Stock, ventes, dettes, caisse, rapports de base |
-| Pro | 10 USD | 1 | 5 | Essentiel, rôles opérationnels, exports et audit |
-| Business | 20 USD | 3 | 15 | Pro, consolidation et affectations multiboutiques |
+| Offre proposée | Prix mensuel à tester | Fonctions |
+|---|---:|---|
+| Essentiel | 5 USD | Toutes, tant que l’abonnement n’est pas expiré |
+| Pro | 10 USD | Toutes, tant que l’abonnement n’est pas expiré |
+| Business | 20 USD | Toutes, tant que l’abonnement n’est pas expiré |
 
 Ces prix sont des hypothèses commerciales. Déterminer les plafonds techniques du catalogue après le pilote. Ne pas bloquer arbitrairement le nombre de ventes déjà réalisées.
 
