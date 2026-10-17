@@ -67,25 +67,11 @@ func (s *Service) InviteMember(ctx context.Context, p tenant.Principal, in Invit
 		if err := access.CheckRoleChange(decision.Role, p.UserID, uuid.Nil, "", in.Role); err != nil {
 			return err
 		}
-		if access.IsOperational(in.Role) && !decision.AllowOperational {
-			return domain.FailedPrecondition("quota_roles", "Cette offre ne comprend pas les rôles opérationnels. Passez à l'offre Pro.")
-		}
 		if in.StoreID != nil {
 			var ok bool
 			if err := tx.QueryRow(ctx, `SELECT true FROM stores WHERE id = $1 AND archived_at IS NULL`, *in.StoreID).Scan(&ok); err != nil || !ok {
 				return domain.NotFound("Boutique introuvable.")
 			}
-		}
-		var active, pending int
-		if err := tx.QueryRow(ctx, `
-			SELECT
-				(SELECT count(*) FROM organization_memberships WHERE status = 'active'),
-				(SELECT count(*) FROM invitations WHERE status = 'pending' AND expires_at > now())
-		`).Scan(&active, &pending); err != nil {
-			return err
-		}
-		if active+pending >= decision.MaxMembers {
-			return domain.FailedPrecondition("quota_members", "Le nombre de collaborateurs autorisés par l'offre est atteint, invitations en attente comprises.")
 		}
 		plain, hash, err := newInvitationToken()
 		if err != nil {

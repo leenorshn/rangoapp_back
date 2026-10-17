@@ -351,9 +351,6 @@ func TestStockLossValueAndExistingFlows(t *testing.T) {
 		t.Fatalf("purchases=%d err=%v", purchases, err)
 	}
 
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company); err != nil {
-		t.Fatal(err)
-	}
 	summary, err := readmodel.New(app).StockSummary(ctx, w.p, w.store)
 	if err != nil || !summary.CostVisible || len(summary.StockCostValues) != 1 || summary.StockCostValues[0].Currency != "USD" {
 		t.Fatalf("%+v %v", summary, err)

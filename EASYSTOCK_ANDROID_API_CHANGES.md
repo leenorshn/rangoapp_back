@@ -35,13 +35,13 @@ Une boutique supplémentaire passe par `createStore`. Cette mutation n'ouvre pas
 
 Les employés ne reçoivent pas d'invitation. Le propriétaire appelle `createEmployee` avec le rôle `manager` ou `seller` et un mot de passe temporaire. La première connexion a le scope `password_change`.
 
-`inviteMember` reste disponible pour les anciens clients. L'offre Essentiel refuse toujours les rôles opérationnels.
+`inviteMember` reste disponible pour les anciens clients. L'offre n'interdit aucun rôle. Seule l'expiration de l'abonnement bloque l'action.
 
 ## Lecture
 
 `sales`, `customers`, `debts`, `stock` et `cash` sont lus dans le processus API. Les montants restent des chaînes décimales. Le stock ne contient pas le coût. Un caissier ne voit que ses propres ventes. Les montants d'une caisse ouverte ne sont visibles que par celui qui l'a ouverte, ou par un rôle qui lit les rapports. Une boutique d'une autre entreprise est introuvable.
 
-`reports` couvre les ventes nettes, les encaissements par moyen, les dettes ouvertes, les dépenses, le stock faible, les produits les plus vendus et les comptages de caisse clôturée. `grossMargin` est la marge brute. Elle est absente pour l'offre Essentiel et pour un rôle sans droit de marge. La période est `[from, to)`. Les dettes ouvertes ne sont pas limitées à cette période. CDF et USD ne sont pas additionnés.
+`reports` couvre les ventes nettes, les encaissements par moyen, les dettes ouvertes, les dépenses, le stock faible, les produits les plus vendus et les comptages de caisse clôturée. `grossMargin` est la marge brute. Elle est absente pour un rôle sans droit de marge. L'offre ne la retire pas. La période est `[from, to)`. Les dettes ouvertes ne sont pas limitées à cette période. CDF et USD ne sont pas additionnés.
 
 ## Pas encore exposés en GraphQL
 

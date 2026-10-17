@@ -114,6 +114,8 @@ postgres://easystock_identity:<IDENTITY_DB_PASSWORD>@<hôte>:25060/defaultdb?ssl
 
 `INTERNAL_CONTEXT_SECRET` fait au moins 32 caractères, identique pour l’API et gRPC.
 
+`GRAPHQL_PLAYGROUND=true` sur le service API ouvre `GET /playground` et l’introspection, le temps du test du MVP. Retirer la variable ensuite.
+
 Spaces : mêmes variables que sur le droplet, région du bucket, `S3_USE_PATH_STYLE=false`.
 
 Le workflow **Deploy to DigitalOcean App Platform** est manuel. Secret supplémentaire : `DIGITALOCEAN_APP_ID`. Il reconstruit l’application déjà créée, sans remplacer les secrets.

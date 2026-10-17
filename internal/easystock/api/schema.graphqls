@@ -149,7 +149,7 @@ type Product {
   availableQuantity: String
   # available or out_of_stock. Present when storeId was sent.
   availability: String
-  # Null sans la permission de marge ou sans l'offre qui l'inclut.
+  # Null sans la permission de marge. L'offre ne le retire pas.
   cost: ProductCost
 }
 
@@ -578,7 +578,7 @@ type StockMovement {
 }
 
 # stockCostValues et incompleteCostProducts sont nuls sans le droit de valorisation
-# ou sans l'offre qui l'inclut. USD et CDF ne sont jamais additionnés.
+# et le droit de marge. L'offre ne les retire pas. USD et CDF ne sont jamais additionnés.
 type StockSummary {
   totalProducts: Int!
   productsInStock: Int!
@@ -675,7 +675,7 @@ type TopProduct {
   currency: String!
 }
 
-# Marge brute. Ce n'est pas le bénéfice net. Null si l'offre ou le rôle ne l'autorise pas.
+# Marge brute. Ce n'est pas le bénéfice net. Null si le rôle ne l'autorise pas. L'offre ne la retire pas.
 type GrossMargin {
   currency: String!
   netSales: String!

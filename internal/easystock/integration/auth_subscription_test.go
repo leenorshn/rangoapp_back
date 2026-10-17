@@ -161,9 +161,6 @@ func TestEmployeeCreationIsolationAndPasswordChange(t *testing.T) {
 	ctx := context.Background()
 	owner := signupOwner(t, svc, sms, "0971200010", "Amina", "Beni")
 	admin, app, identityPool, _ := testutil.Pools(t)
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, owner.CompanyID); err != nil {
-		t.Fatal(err)
-	}
 	storeID := uuid.New()
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO stores (id, company_id, name) VALUES ($1,$2,'Centre')

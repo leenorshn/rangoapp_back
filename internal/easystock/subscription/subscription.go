@@ -32,15 +32,12 @@ func New(app, job *pgxpool.Pool) *Service {
 }
 
 type View struct {
-	PlanCode    string
-	Status      string
-	Source      string
-	PeriodEnd   *time.Time
-	TrialEnds   *time.Time
-	GraceEnds   *time.Time
-	AllowExport bool
-	MaxStores   int
-	MaxMembers  int
+	PlanCode  string
+	Status    string
+	Source    string
+	PeriodEnd *time.Time
+	TrialEnds *time.Time
+	GraceEnds *time.Time
 }
 
 type LocalPaymentInput struct {
@@ -80,13 +77,10 @@ func (s *Service) Get(ctx context.Context, p tenant.Principal) (View, error) {
 func load(ctx context.Context, tx pgx.Tx) (View, error) {
 	var view View
 	err := tx.QueryRow(ctx, `
-		SELECT s.plan_code, s.status, s.source, s.current_period_end, s.trial_ends_at, s.grace_ends_at,
-		       p.allow_export, p.max_stores, p.max_active_members
+		SELECT s.plan_code, s.status, s.source, s.current_period_end, s.trial_ends_at, s.grace_ends_at
 		FROM subscription_snapshots s
-		JOIN subscription_plans p ON p.code = s.plan_code
 	`).Scan(
 		&view.PlanCode, &view.Status, &view.Source, &view.PeriodEnd, &view.TrialEnds, &view.GraceEnds,
-		&view.AllowExport, &view.MaxStores, &view.MaxMembers,
 	)
 	if err != nil {
 		return View{}, domain.NotFound("Abonnement introuvable.")

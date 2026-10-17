@@ -13,16 +13,16 @@ Postgres embarqué 16 (`embedded-postgres`), rôle `easystock_app` sans `SUPERUS
 - Remboursement qui réintègre le stock revendable.
 - Clôture de caisse immuable, correction sur une nouvelle session.
 - Isolation d’entreprise, y compris après `SET row_security = off`, et contexte de session vidé en fin de transaction.
-- Export de marge refusé au caissier et à l’offre Essentiel ; autorisé en Pro sous le nom `gross_margin`.
+- Export de marge refusé au caissier ; autorisé au propriétaire sous le nom `gross_margin`, quelle que soit l'offre.
 - Abonnement expiré : nouvelle vente refusée, consultation des ventes encore possible.
-- Quota de boutiques, rôle opérationnel refusé sur Essentiel, un propriétaire ne change pas son propre rôle.
+- L'offre ne limite plus les boutiques, les rôles ni les marges. Un propriétaire ne change pas son propre rôle. L'expiration de l'abonnement bloque l'accès.
 - Paiement local `source=local`, refus de chevauchement avec une période Clerk, webhook dupliqué et événement périmé ignoré.
 - gRPC : sans jeton, `Unauthenticated` ; entreprise forgée, `PermissionDenied` ; le second appel avec la même clé renvoie la même vente.
 - Import JSON : répétition à blanc annulée, second import sans nouvelle vente, UUID stables.
 - Curseur catalogue, y compris produit archivé.
 - Jeton Clerk RS256 (émetteur, expiration, partie autorisée) et chargement JWKS.
 - Création d'entreprise avec essai de 14 jours, première boutique, invitation et acceptation. Une entreprise non liée se sélectionne par `X-EasyStock-Company`. Deux entreprises sans organisation Clerk ne sont pas fusionnées au hasard.
-- GraphQL lit les ventes, clients, dettes, stock, caisse et rapports. Le coût n'est pas dans le stock. La marge brute est refusée sur l'offre Essentiel. Un caissier ne voit que ses ventes. Une boutique d'une autre entreprise est introuvable.
+- GraphQL lit les ventes, clients, dettes, stock, caisse et rapports. Le coût n'est pas dans le stock. La marge brute suit le rôle, pas l'offre. Un caissier ne voit que ses ventes. Une boutique d'une autre entreprise est introuvable.
 - GraphQL `confirmSale` envoie des chaînes décimales et le jeton de contexte interne. `POST /graphql` refuse un bearer qui n'est pas une session Clerk.
 - Taux de change par entreprise. `convertAmount` utilise le sens enregistré, sinon l'inverse, et n'additionne jamais deux devises. Un caissier convertit ; seul le propriétaire ou l'administrateur enregistre le taux. Une autre entreprise ne voit pas le taux.
 - Images produit (`image/jpeg`, `image/png`, `image/webp`) et justificatifs de dépense (ces images, plus `application/pdf`). Le client dépose les octets sur une URL signée, puis confirme. Sans `S3_BUCKET`, le dépôt est refusé et le reste de l'API fonctionne. La dépense n'accepte qu'un justificatif déjà reçu.
@@ -31,7 +31,7 @@ Commande : `go test ./internal/easystock/... -count=1`. Dernier passage : `api` 
 
 ## Décisions
 
-Un seul processus Commerce. Les écritures de vente GraphQL passent par gRPC. Les lectures, la création d'entreprise et les invitations utilisent le rôle RLS dans le processus API. Pas de Redis. Le prix est défini par conditionnement, pas par une multiplication silencieuse. La marge s'appelle marge brute. L'export exige l'offre Pro.
+Un seul processus Commerce. Les écritures de vente GraphQL passent par gRPC. Les lectures, la création d'entreprise et les invitations utilisent le rôle RLS dans le processus API. Pas de Redis. Le prix est défini par conditionnement, pas par une multiplication silencieuse. La marge s'appelle marge brute. L'offre ne retire pas l'export : l'expiration de l'abonnement le bloque.
 
 ## Incomplet
 

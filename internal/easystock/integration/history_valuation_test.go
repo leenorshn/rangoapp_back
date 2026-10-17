@@ -334,13 +334,6 @@ func TestStockValuationTransitLossAndCurrencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	reads := readmodel.New(app)
-	hidden, err := reads.StockSummary(ctx, w.p, uuid.Nil)
-	if err != nil || hidden.CostVisible || hidden.ProductsInStock < 1 {
-		t.Fatalf("essentiel %+v %v", hidden, err)
-	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company); err != nil {
-		t.Fatal(err)
-	}
 	if !summaryAmount(t, reads, w, uuid.Nil, "USD").Equal(decimal.NewFromInt(480)) {
 		t.Fatalf("opening %s", summaryAmount(t, reads, w, uuid.Nil, "USD"))
 	}
@@ -458,9 +451,6 @@ func TestCostVisibilityDoesNotLeak(t *testing.T) {
 	hiddenInventory, err := svc.GetStockInventory(ctx, keeper, session.ID)
 	if err != nil || hiddenInventory.Lines[0].VarianceValue != "" || hiddenInventory.Lines[0].VarianceCurrency != "" {
 		t.Fatalf("keeper inventory %+v %v", hiddenInventory.Lines, err)
-	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company); err != nil {
-		t.Fatal(err)
 	}
 	ownerInventory, err := svc.GetStockInventory(ctx, w.p, session.ID)
 	if err != nil || ownerInventory.Lines[0].VarianceValue == "" || ownerInventory.Lines[0].VarianceCurrency != "USD" {

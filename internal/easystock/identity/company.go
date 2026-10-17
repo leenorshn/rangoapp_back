@@ -362,29 +362,6 @@ func (s *Service) AcceptInvitation(ctx context.Context, userID uuid.UUID, token 
 	if time.Now().After(expires) {
 		return AcceptedInvite{}, domain.FailedPrecondition("invitation_expired", "Cette invitation a expiré. Demandez-en une nouvelle.")
 	}
-	var maxMembers int
-	var operational bool
-	if err := tx.QueryRow(ctx, `
-		SELECT p.max_active_members, p.allow_operational_roles
-		FROM subscription_snapshots s
-		JOIN subscription_plans p ON p.code = s.plan_code
-		WHERE s.company_id = $1
-	`, companyID).Scan(&maxMembers, &operational); err != nil {
-		return AcceptedInvite{}, domain.FailedPrecondition("subscription", "Aucun abonnement n'est enregistré pour cette entreprise.")
-	}
-	if isOperationalRole(role) && !operational {
-		return AcceptedInvite{}, domain.FailedPrecondition("quota_roles", "Cette offre ne comprend pas les rôles opérationnels. Passez à l'offre Pro.")
-	}
-	var active int
-	if err := tx.QueryRow(ctx, `
-		SELECT count(*) FROM organization_memberships
-		WHERE company_id = $1 AND status = 'active' AND user_id <> $2
-	`, companyID, userID).Scan(&active); err != nil {
-		return AcceptedInvite{}, err
-	}
-	if active >= maxMembers {
-		return AcceptedInvite{}, domain.FailedPrecondition("quota_members", "Le nombre de collaborateurs actifs autorisés par l'offre est atteint.")
-	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO organization_memberships (id, company_id, user_id, org_role, status)
 		VALUES ($1, $2, $3, $4, 'active')
@@ -492,13 +469,4 @@ func currencyOK(value string) bool {
 		}
 	}
 	return true
-}
-
-func isOperationalRole(role string) bool {
-	switch role {
-	case "store_manager", "cashier", "stockkeeper", "accountant":
-		return true
-	default:
-		return false
-	}
 }

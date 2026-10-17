@@ -259,9 +259,6 @@ func resolveStores(ctx context.Context, tx pgx.Tx, p tenant.Principal, filter Fi
 	if len(allowed) == 0 {
 		return nil, domain.PermissionDenied("store", "Aucune boutique autorisée pour ce rapport.")
 	}
-	if len(allowed) > 1 && !decision.AllowMultistore {
-		return nil, domain.FailedPrecondition("multistore", "La consolidation de plusieurs boutiques fait partie de l'offre Business. Consultez une boutique à la fois.")
-	}
 	rows, err := tx.Query(ctx, `SELECT id FROM stores WHERE id = ANY($1) AND archived_at IS NULL`, allowed)
 	if err != nil {
 		return nil, err

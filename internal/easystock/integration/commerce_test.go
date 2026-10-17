@@ -343,21 +343,12 @@ func TestMarginExportAndExpiredSubscription(t *testing.T) {
 	if _, err := reportsSvc.ExportMargin(ctx, cashierP, filter); err == nil {
 		t.Fatal("cashier read a margin export")
 	}
-	if _, err := reportsSvc.ExportMargin(ctx, w.p, filter); err == nil {
-		t.Fatal("essentiel plan exported a margin")
-	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company); err != nil {
-		t.Fatal(err)
-	}
 	csv, err := reportsSvc.ExportMargin(ctx, w.p, filter)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(csv, "gross_margin") || strings.Contains(csv, "net_profit") {
 		t.Fatalf("csv = %s", csv)
-	}
-	if _, err := reportsSvc.ExportMargin(ctx, cashierP, filter); err == nil {
-		t.Fatal("cashier margin export succeeded on pro")
 	}
 	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET status = 'expired' WHERE company_id = $1`, w.company); err != nil {
 		t.Fatal(err)
@@ -375,8 +366,9 @@ func TestQuotasRolesAndLocalPayment(t *testing.T) {
 	w := seed(t, admin)
 	ctx := context.Background()
 	svc := commerce.New(app)
-	if _, err := svc.CreateStore(ctx, w.p, "Deuxième", "Africa/Lubumbashi"); err == nil {
-		t.Fatal("essentiel accepted a second store")
+	second, err := svc.CreateStore(ctx, w.p, "Deuxième", "Africa/Lubumbashi")
+	if err != nil || second.Name != "Deuxième" {
+		t.Fatalf("store %+v %v", second, err)
 	}
 	other := uuid.New()
 	if _, err := admin.Exec(ctx, `INSERT INTO users (id, display_name) VALUES ($1,'Admin')`, other); err != nil {
@@ -385,8 +377,8 @@ func TestQuotasRolesAndLocalPayment(t *testing.T) {
 	if _, err := admin.Exec(ctx, `INSERT INTO organization_memberships (company_id, user_id, org_role, status) VALUES ($1,$2,'organization_admin','active')`, w.company, other); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.SetMemberRole(ctx, w.p, other, "cashier"); err == nil {
-		t.Fatal("essentiel accepted an operational role")
+	if err := svc.SetMemberRole(ctx, w.p, other, "cashier"); err != nil {
+		t.Fatal(err)
 	}
 	if err := svc.SetMemberRole(ctx, w.p, w.user, "cashier"); err == nil {
 		t.Fatal("owner changed own role")

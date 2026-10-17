@@ -24,7 +24,7 @@ La première connexion a le scope `password_change`. Seuls `changePassword`, `lo
 
 `deactivateEmployee` passe l'appartenance à `disabled` et révoque les sessions de cet utilisateur pour cette entreprise. L'historique des ventes reste. `reactivateEmployee` réactive l'appartenance sans restaurer ces sessions.
 
-Les quotas déjà définis sur les plans restent appliqués. L'offre Essentiel n'autorise pas les rôles opérationnels. `manager` et `seller` ne sont pas une limite de deux personnes.
+L'offre ne limite pas les fonctionnalités. Boutiques, employés, rôles, marges, exports et consolidation restent disponibles tant que l'abonnement n'est pas expiré. Le rôle de l'appelant continue de limiter ce qu'il peut faire.
 
 ## Sessions
 

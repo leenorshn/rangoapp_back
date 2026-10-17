@@ -61,11 +61,6 @@ type Decision struct {
 	CreditLimited      bool
 	PlanCode           string
 	SubscriptionStatus string
-	AllowExport        bool
-	AllowOperational   bool
-	AllowMultistore    bool
-	MaxStores          int
-	MaxMembers         int
 }
 
 var rolePerms = map[string]map[string]struct{}{
@@ -90,15 +85,6 @@ func permSet(perms ...string) map[string]struct{} {
 func RoleAllows(role, perm string) bool {
 	_, ok := rolePerms[role][perm]
 	return ok
-}
-
-func IsOperational(role string) bool {
-	switch role {
-	case "manager", "seller", "store_manager", "cashier", "stockkeeper", "accountant":
-		return true
-	default:
-		return false
-	}
 }
 
 func IsCommercial(perm string) bool {
@@ -134,8 +120,8 @@ func AuthorizeRead(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, 
 	return authorize(ctx, tx, companyID, userID, storeID, perm, false)
 }
 
-// CanReadCost is true only when the caller has both valuation and margin
-// rights. Each right still requires an offer that includes margins.
+// CanReadCost is true only when the caller has both valuation and margin rights.
+// The offer does not hide cost. An expired subscription still blocks the read.
 func CanReadCost(ctx context.Context, tx pgx.Tx, companyID, userID, storeID uuid.UUID) (bool, error) {
 	var scope *uuid.UUID
 	if storeID != uuid.Nil {
@@ -247,17 +233,12 @@ func authorize(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, stor
 	var lifecycle string
 	var trialEnd, periodEnd, archived *time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT s.status, COALESCE(s.lifecycle, 'active'), s.plan_code, s.trial_ends_at, s.current_period_end, c.archived_at,
-		       p.allow_export, p.allow_operational_roles, p.allow_multistore,
-		       p.max_stores, p.max_active_members
+		SELECT s.status, COALESCE(s.lifecycle, 'active'), s.plan_code, s.trial_ends_at, s.current_period_end, c.archived_at
 		FROM subscription_snapshots s
-		JOIN subscription_plans p ON p.code = s.plan_code
 		JOIN companies c ON c.id = s.company_id
 		WHERE s.company_id = $1
 	`, companyID).Scan(
 		&decision.SubscriptionStatus, &lifecycle, &decision.PlanCode, &trialEnd, &periodEnd, &archived,
-		&decision.AllowExport, &decision.AllowOperational,
-		&decision.AllowMultistore, &decision.MaxStores, &decision.MaxMembers,
 	)
 	if err != nil {
 		return Decision{}, domain.FailedPrecondition("SUBSCRIPTION_REQUIRED", "Aucun abonnement n'est enregistré pour cette entreprise.")
@@ -266,9 +247,6 @@ func authorize(ctx context.Context, tx pgx.Tx, companyID, userID uuid.UUID, stor
 		if err := SubscriptionBlock(decision.SubscriptionStatus, lifecycle, trialEnd, periodEnd, archived, time.Now().UTC()); err != nil {
 			return Decision{}, err
 		}
-	}
-	if (perm == ReportsExport || perm == MarginsRead || perm == StockValuationRead) && !decision.AllowExport {
-		return Decision{}, domain.PermissionDenied("plan", "Cette offre ne comprend pas les exports ni les marges. Passez à l'offre Pro pour les activer.")
 	}
 	return decision, nil
 }

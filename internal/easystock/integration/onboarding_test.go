@@ -93,9 +93,6 @@ func TestCreateCompanyInvitationAndRegistration(t *testing.T) {
 	if err != nil || orgSession.CompanyID != companyID {
 		t.Fatalf("org session %v %v", orgSession, err)
 	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, companyID); err != nil {
-		t.Fatal(err)
-	}
 	inviteQuery := `mutation ($input: InviteMemberInput!) { inviteMember(input: $input) { id email role token } }`
 	invited := api.Execute(member, schema, inviteQuery, map[string]any{"input": map[string]any{
 		"email": "cashier@shop.test", "role": "cashier", "storeId": storeID.String(),
@@ -132,14 +129,11 @@ func TestCreateCompanyInvitationAndRegistration(t *testing.T) {
 	if len(replay.Errors) > 0 {
 		t.Fatal(replay.Errors)
 	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'essentiel' WHERE company_id = $1`, companyID); err != nil {
-		t.Fatal(err)
-	}
-	blocked := api.Execute(member, schema, inviteQuery, map[string]any{"input": map[string]any{
+	secondInvite := api.Execute(member, schema, inviteQuery, map[string]any{"input": map[string]any{
 		"email": "stock@shop.test", "role": "stockkeeper", "storeId": storeID.String(),
 	}})
-	if len(blocked.Errors) == 0 {
-		t.Fatal("essentiel accepted an operational invitation")
+	if len(secondInvite.Errors) > 0 {
+		t.Fatal(secondInvite.Errors)
 	}
 	tx, err := app.Begin(ctx)
 	if err != nil {
@@ -292,8 +286,8 @@ func TestGraphQLReadsSalesCustomersDebtsStockCashReports(t *testing.T) {
 	if !decimalEqual(report["openDebts"].(map[string]any)["openAmount"].(string), "70") {
 		t.Fatalf("debts %v", report["openDebts"])
 	}
-	if report["grossMargin"] != nil || len(result.Errors) == 0 {
-		t.Fatalf("margin should be hidden on essentiel, data=%v errors=%v", report["grossMargin"], result.Errors)
+	if len(result.Errors) > 0 || report["grossMargin"] == nil {
+		t.Fatalf("margin should stay available on the current offer, data=%v errors=%v", report["grossMargin"], result.Errors)
 	}
 	cashierResult := api.Execute(api.WithPrincipal(ctx, cashierPrincipal), schema, `query ($store: ID!) { sales(storeId: $store) { id } }`, map[string]any{"store": w.store.String()})
 	if len(cashierResult.Errors) > 0 {
@@ -394,9 +388,6 @@ func TestStoresListAndCreateStoreDoNotOpenACompany(t *testing.T) {
 	}`, map[string]any{"input": map[string]any{"name": "Annexe"}})
 	if len(denied.Errors) == 0 {
 		t.Fatal("seller opened a store")
-	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'business' WHERE company_id = $1`, companyID); err != nil {
-		t.Fatal(err)
 	}
 	var companiesBefore int
 	if err := admin.QueryRow(ctx, `SELECT count(*) FROM companies WHERE created_by = $1`, userID).Scan(&companiesBefore); err != nil {

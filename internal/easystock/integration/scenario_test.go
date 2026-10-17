@@ -20,9 +20,6 @@ func TestStockModuleBusinessScenario(t *testing.T) {
 	admin, app, identityPool, _ := testutil.Pools(t)
 	w := shop(t, admin)
 	ctx := context.Background()
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company); err != nil {
-		t.Fatal(err)
-	}
 	dest := insertStore(t, admin, w, "Annexe")
 	svc := commerce.New(app)
 	reads := readmodel.New(app)

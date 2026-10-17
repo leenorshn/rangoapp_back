@@ -528,28 +528,6 @@ func (s *Service) CreateEmployee(ctx context.Context, actor tenant.Principal, in
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Employee{}, err
 	}
-	var allow bool
-	var maxMembers int
-	if err := tx.QueryRow(ctx, `
-		SELECT p.allow_operational_roles, p.max_active_members
-		FROM subscription_snapshots s
-		JOIN subscription_plans p ON p.code = s.plan_code
-		WHERE s.company_id = $1
-	`, actor.CompanyID).Scan(&allow, &maxMembers); err != nil {
-		return Employee{}, domain.FailedPrecondition("SUBSCRIPTION_REQUIRED", "Cette entreprise n'a pas d'abonnement actif.")
-	}
-	if !allow {
-		return Employee{}, domain.FailedPrecondition("quota_roles", "Cette offre ne comprend pas les rôles opérationnels. Passez à l'offre Pro.")
-	}
-	var active int
-	if err := tx.QueryRow(ctx, `
-		SELECT count(*) FROM organization_memberships WHERE company_id = $1 AND status = 'active'
-	`, actor.CompanyID).Scan(&active); err != nil {
-		return Employee{}, err
-	}
-	if active >= maxMembers {
-		return Employee{}, domain.FailedPrecondition("quota_members", "Le nombre de collaborateurs autorisés par l'offre est atteint.")
-	}
 	userID := uuid.New()
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO users (id, display_name, full_name, phone, password_hash, must_change_password, status)
@@ -741,19 +719,6 @@ func (s *Service) ReactivateEmployee(ctx context.Context, actor tenant.Principal
 	}
 	if status != "disabled" {
 		return domain.FailedPrecondition("membership", "Cette appartenance ne peut pas être réactivée.")
-	}
-	var maxMembers, active int
-	if err := tx.QueryRow(ctx, `
-		SELECT p.max_active_members,
-		       (SELECT count(*) FROM organization_memberships WHERE company_id = $1 AND status = 'active')
-		FROM subscription_snapshots s
-		JOIN subscription_plans p ON p.code = s.plan_code
-		WHERE s.company_id = $1
-	`, actor.CompanyID).Scan(&maxMembers, &active); err != nil {
-		return err
-	}
-	if active >= maxMembers {
-		return domain.FailedPrecondition("quota_members", "Le nombre de collaborateurs autorisés par l'offre est atteint.")
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE organization_memberships SET status = 'active'

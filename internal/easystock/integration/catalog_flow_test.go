@@ -366,13 +366,8 @@ func TestCatalogPermissionsHideCost(t *testing.T) {
 		t.Fatalf("seller cost = %+v %v", cost, err)
 	}
 	ownerCost, err := svc.ProductCost(ctx, w.p, w.store, w.product)
-	if err != nil || ownerCost != nil {
-		t.Fatalf("essentiel cost = %+v %v", ownerCost, err)
-	}
-	exec(`UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company)
-	ownerCost, err = svc.ProductCost(ctx, w.p, w.store, w.product)
 	if err != nil || ownerCost == nil || ownerCost.AvgCost != "4" || ownerCost.Currency != "USD" {
-		t.Fatalf("pro cost = %+v %v", ownerCost, err)
+		t.Fatalf("owner cost = %+v %v", ownerCost, err)
 	}
 	cost, err = svc.ProductCost(ctx, seller, w.store, w.product)
 	if err != nil || cost != nil {

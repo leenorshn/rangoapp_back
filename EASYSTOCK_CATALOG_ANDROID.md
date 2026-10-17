@@ -6,7 +6,7 @@ Une ligne vendable se construit avec l'identifiant produit, le **nom** du condit
 
 ## Droits
 
-Le propriétaire gère le catalogue. Le gérant aussi, sauf si `catalog.manage` lui est refusé. Le vendeur lit les produits et les prix de ses boutiques, et ne peut pas les modifier. `cost` est `null` sans la permission de marge, ou sur une offre qui n'inclut pas les marges. Ce n'est pas une erreur, et le coût n'apparaît dans aucun autre champ.
+Le propriétaire gère le catalogue. Le gérant aussi, sauf si `catalog.manage` lui est refusé. Le vendeur lit les produits et les prix de ses boutiques, et ne peut pas les modifier. `cost` est `null` sans la permission de marge. L'offre ne le retire pas. Ce n'est pas une erreur, et le coût n'apparaît dans aucun autre champ.
 
 Une devise sans prix n'est pas vendable. USD et CDF sont indépendants : omettre l'autre prix ne fait pas échouer la création.
 

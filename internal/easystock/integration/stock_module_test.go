@@ -353,9 +353,6 @@ func TestStockFractionalAndSummaryPermissions(t *testing.T) {
 	if hidden.CostVisible || hidden.ProductsInStock != 3 || hidden.LowStockProducts != 1 || hidden.OutOfStockProducts != 0 {
 		t.Fatalf("seller summary %+v", hidden)
 	}
-	if _, err := admin.Exec(ctx, `UPDATE subscription_snapshots SET plan_code = 'pro' WHERE company_id = $1`, w.company); err != nil {
-		t.Fatal(err)
-	}
 	stillHidden, err := reads.StockSummary(ctx, seller, w.store)
 	if err != nil || stillHidden.CostVisible {
 		t.Fatalf("seller pro %+v %v", stillHidden, err)

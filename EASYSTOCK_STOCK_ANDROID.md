@@ -24,7 +24,7 @@ Le stock d’un produit est **un seul solde par boutique, dans l’unité de bas
 | `stock.inventory.validate` | idem | valider les écarts |
 | `stock.adjust` | idem | ajustement historique en une étape, non exposé à Android |
 | `stock.movements.read` | tous les rôles ci-dessus | journal |
-| `stock.valuation.read` | propriétaire, administrateur, comptable, et seulement si l’offre autorise les marges (Pro ou Business) | coûts d’achat |
+| `stock.valuation.read` | propriétaire, administrateur, comptable | coûts d’achat |
 
 Le vendeur voit les quantités. Il ne valide pas un inventaire. Un droit peut être retiré par une exception `permission_overrides`.
 
@@ -485,7 +485,7 @@ mutation ($input: RecordInventoryCountInput!) {
 }
 ```
 
-`theoreticalQuantity`, `countedBaseTotal` et `variance` sont le regroupement du produit en unité de base, répété sur chaque ligne. `variance = quantité physique − quantité théorique`. `varianceValue` est cet écart multiplié par le coût moyen. Il est absent, et `costIncomplete` vaut `true`, quand le coût n’est pas fiable. `varianceValue` et `varianceCurrency` sont aussi absents sans `stock.valuation.read` et `margins.read` sur une offre qui inclut les marges. Une valeur absente n’est pas un écart de zéro. Recompter le même conditionnement remplace la ligne.
+`theoreticalQuantity`, `countedBaseTotal` et `variance` sont le regroupement du produit en unité de base, répété sur chaque ligne. `variance = quantité physique − quantité théorique`. `varianceValue` est cet écart multiplié par le coût moyen. Il est absent, et `costIncomplete` vaut `true`, quand le coût n’est pas fiable. `varianceValue` et `varianceCurrency` sont aussi absents sans `stock.valuation.read` et `margins.read`. L'offre ne les retire pas. Une valeur absente n’est pas un écart de zéro. Recompter le même conditionnement remplace la ligne.
 
 Permission : `stock.inventory.count`.
 
@@ -617,9 +617,9 @@ Sans `storeId`, le propriétaire et l’administrateur voient toutes les boutiqu
 - `incompleteCostProducts` : stock positif, ou quantité en transit, dont le coût n’est pas fiable. Ces quantités sont exclues des totaux de coût.
 - `incompleteRetailProducts` : stock positif sans prix actif de l’unité de base.
 
-`stockCostValues` et `incompleteCostProducts` sont **nuls** sans `stock.valuation.read` et `margins.read`, ou si l’offre n’inclut pas les marges. Ce n’est pas un coût de zéro. Les compteurs de quantités, de ruptures et de seuils restent visibles. Les prix de vente aussi. Le coût d’achat d’un produit, `product.cost`, suit la même règle.
+`stockCostValues` et `incompleteCostProducts` sont **nuls** sans `stock.valuation.read` et `margins.read`. L'offre ne les retire pas. Ce n’est pas un coût de zéro. Les compteurs de quantités, de ruptures et de seuils restent visibles. Les prix de vente aussi. Le coût d’achat d’un produit, `product.cost`, suit la même règle.
 
-Réponse pour une offre Pro, avec le droit de valorisation et le droit de marge : `costMethod` `"weighted_average"`, `stockCostValues` `[{ "currency": "USD", "amount": "4" }]`. Sans ces deux droits, `stockCostValues` et `incompleteCostProducts` sont nuls. `productsInStock` reste renseigné.
+Réponse avec le droit de valorisation et le droit de marge : `costMethod` `"weighted_average"`, `stockCostValues` `[{ "currency": "USD", "amount": "4" }]`. Sans ces deux droits, `stockCostValues` et `incompleteCostProducts` sont nuls. `productsInStock` reste renseigné.
 
 Permission de lecture : `stock.read`.
 

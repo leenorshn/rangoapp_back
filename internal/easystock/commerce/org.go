@@ -46,8 +46,7 @@ type Store struct {
 func (s *Service) CreateStore(ctx context.Context, p tenant.Principal, name, timezone string) (Store, error) {
 	var created Store
 	err := s.withTx(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
-		decision, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, nil, access.StoresManage)
-		if err != nil {
+		if _, err := access.Authorize(ctx, tx, p.CompanyID, p.UserID, nil, access.StoresManage); err != nil {
 			return err
 		}
 		name = strings.TrimSpace(name)
@@ -63,13 +62,6 @@ func (s *Service) CreateStore(ctx context.Context, p tenant.Principal, name, tim
 		}
 		if _, err := time.LoadLocation(timezone); err != nil {
 			return domain.Invalid("timezone", "Le fuseau horaire n'est pas reconnu.")
-		}
-		var count int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM stores WHERE archived_at IS NULL`).Scan(&count); err != nil {
-			return err
-		}
-		if count >= decision.MaxStores {
-			return domain.FailedPrecondition("quota_stores", "Cette offre ne permet pas d'ajouter une boutique. Les boutiques existantes sont conservées.")
 		}
 		id := uuid.New()
 		registerID := uuid.New()
@@ -357,18 +349,6 @@ func (s *Service) SetMemberRole(ctx context.Context, p tenant.Principal, userID 
 		if err := access.CheckRoleChange(decision.Role, p.UserID, userID, current, role); err != nil {
 			return err
 		}
-		if access.IsOperational(role) && !decision.AllowOperational {
-			return domain.FailedPrecondition("quota_roles", "Cette offre ne comprend pas les rôles opérationnels. Passez à l'offre Pro.")
-		}
-		if status != "active" {
-			var active int
-			if err := tx.QueryRow(ctx, `SELECT count(*) FROM organization_memberships WHERE status = 'active'`).Scan(&active); err != nil {
-				return err
-			}
-			if active >= decision.MaxMembers {
-				return domain.FailedPrecondition("quota_members", "Le nombre de collaborateurs actifs autorisés par l'offre est atteint.")
-			}
-		}
 		if current == "owner" && (role != "owner" || status == "active") && role != "owner" {
 			var others int
 			if err := tx.QueryRow(ctx, `
@@ -407,17 +387,10 @@ func (s *Service) AssignStore(ctx context.Context, p tenant.Principal, userID, s
 				return domain.PermissionDenied("assignment", "Vous ne pouvez affecter du personnel que dans votre boutique.")
 			}
 		}
-		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM store_assignments WHERE user_id = $1`, userID).Scan(&n); err != nil {
-			return err
-		}
 		var already bool
 		_ = tx.QueryRow(ctx, `SELECT true FROM store_assignments WHERE user_id = $1 AND store_id = $2`, userID, storeID).Scan(&already)
 		if already {
 			return nil
-		}
-		if n >= 1 && !decision.AllowMultistore {
-			return domain.FailedPrecondition("quota_multistore", "Cette offre ne permet pas d'affecter une personne à plusieurs boutiques.")
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO store_assignments (company_id, store_id, user_id) VALUES ($1,$2,$3)
